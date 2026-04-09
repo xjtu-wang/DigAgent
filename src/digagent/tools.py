@@ -14,7 +14,10 @@ import yaml
 
 from digagent.config import AppSettings, get_settings
 from digagent.cve import CveKnowledgeBase
-from digagent.models import ToolManifest
+from digagent.models import PluginCommandManifest, ToolManifest
+from digagent.plugins import PluginCatalog
+from digagent.storage import FileStorage
+from digagent.storage.memory_search import MemorySearchEngine
 
 SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", "data/artifacts/blob", "webui/dist"}
 
@@ -31,9 +34,20 @@ class ToolExecutionResult:
 
 
 class ToolRegistry:
-    def __init__(self, settings: AppSettings | None = None, knowledge_base: CveKnowledgeBase | None = None) -> None:
+    def __init__(
+        self,
+        settings: AppSettings | None = None,
+        knowledge_base: CveKnowledgeBase | None = None,
+        *,
+        storage: FileStorage | None = None,
+        memory_search: MemorySearchEngine | None = None,
+        plugins: PluginCatalog | None = None,
+    ) -> None:
         self.settings = settings or get_settings()
         self.knowledge_base = knowledge_base or CveKnowledgeBase(self.settings)
+        self.storage = storage or FileStorage(self.settings)
+        self.memory_search_engine = memory_search or MemorySearchEngine(self.storage)
+        self.plugins = plugins or PluginCatalog(self.settings)
         self.tools_dir = self.settings.data_dir / "tools"
         self._bootstrap_manifests()
 
@@ -60,6 +74,8 @@ class ToolRegistry:
                 payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
             manifest = ToolManifest.model_validate(payload)
             manifests[manifest.name] = manifest
+        for command in self.plugins.command_manifests():
+            manifests[command.name] = ToolManifest.model_validate(command.model_dump(mode="json"))
         return manifests
 
     def load(self, name: str) -> ToolManifest:
@@ -79,7 +95,7 @@ class ToolRegistry:
         adapter = getattr(self, manifest.executor_adapter, None)
         if adapter is None:
             raise KeyError(f"Unknown tool adapter: {manifest.executor_adapter}")
-        result = adapter(arguments)
+        result = adapter({**arguments, "__tool_name": name})
         if hasattr(result, "__await__"):
             return await result
         return result
@@ -241,3 +257,74 @@ class ToolRegistry:
             artifact_kind="file",
             source={"tool_name": "vuln_kb_lookup"},
         )
+
+    def memory_search(self, arguments: dict[str, Any]) -> ToolExecutionResult:
+        hits = self.memory_search_engine.search(
+            query=str(arguments.get("query") or ""),
+            session_id=arguments.get("session_id"),
+            run_id=arguments.get("run_id"),
+            scope=str(arguments.get("scope") or "session"),
+            sensitivity=str(arguments.get("sensitivity") or "normal"),
+            limit=int(arguments.get("limit") or 5),
+        )
+        payload = [hit.model_dump(mode="json") for hit in hits]
+        return ToolExecutionResult(
+            title="Memory Search Results",
+            summary=f"Matched {len(hits)} memory entries.",
+            raw_output=json.dumps(payload, ensure_ascii=False, indent=2),
+            structured_facts=[{"key": "match_count", "value": len(hits)}],
+            mime_type="application/json",
+            artifact_kind="file",
+            source={"tool_name": "memory_search"},
+        )
+
+    def memory_get(self, arguments: dict[str, Any]) -> ToolExecutionResult:
+        ref = str(arguments.get("ref") or "")
+        hit = self.memory_search_engine.get(
+            ref,
+            session_id=arguments.get("session_id"),
+            sensitivity=str(arguments.get("sensitivity") or "normal"),
+        )
+        payload = hit.model_dump(mode="json")
+        return ToolExecutionResult(
+            title=f"Memory Entry: {hit.title}",
+            summary=hit.summary,
+            raw_output=json.dumps(payload, ensure_ascii=False, indent=2),
+            structured_facts=[
+                {"key": "ref", "value": hit.ref},
+                {"key": "source_type", "value": hit.source_type},
+                {"key": "score", "value": hit.score},
+            ],
+            mime_type="application/json",
+            artifact_kind="file",
+            source={"tool_name": "memory_get", "ref": hit.ref},
+        )
+
+    def plugin_command(self, arguments: dict[str, Any]) -> ToolExecutionResult:
+        manifest = self._plugin_command_manifest(str(arguments.get("__tool_name") or ""))
+        if manifest.script_path is None:
+            raise RuntimeError(f"plugin command '{manifest.name}' has no script_path")
+        argv = [str(item) for item in arguments.get("argv", [])]
+        completed = subprocess.run(
+            [manifest.script_path, *argv],
+            text=True,
+            capture_output=True,
+            timeout=self.settings.shell_timeout_sec,
+        )
+        output = (completed.stdout or "") + ("\n[stderr]\n" + completed.stderr if completed.stderr else "")
+        return ToolExecutionResult(
+            title=f"Plugin Command: {manifest.name}",
+            summary=f"Plugin command exited with code {completed.returncode}.",
+            raw_output=output[: self.settings.shell_output_limit],
+            structured_facts=[
+                {"key": "exit_code", "value": completed.returncode},
+                {"key": "plugin_id", "value": manifest.plugin_id},
+            ],
+            source={"tool_name": manifest.name, "plugin_id": manifest.plugin_id},
+        )
+
+    def _plugin_command_manifest(self, name: str) -> PluginCommandManifest:
+        for command in self.plugins.command_manifests():
+            if command.name == name:
+                return command
+        raise KeyError(f"Unknown plugin command: {name}")

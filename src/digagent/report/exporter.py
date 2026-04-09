@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import re
 import subprocess
-import textwrap
 from pathlib import Path
 
 from jinja2 import Template
@@ -93,52 +91,7 @@ class ReportExporter:
                 f"--print-to-pdf={output_path}",
                 str(html_path),
             ]
-        try:
-            subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=120)
-            return output_path.read_bytes()
-        except Exception:
-            fallback = self._fallback_pdf(html_path.read_text(encoding="utf-8"))
-            output_path.write_bytes(fallback)
-            return fallback
-
-    def _fallback_pdf(self, html: str) -> bytes:
-        text = re.sub(r"<[^>]+>", " ", html)
-        text = re.sub(r"\s+", " ", text).strip()
-        wrapped: list[str] = []
-        for paragraph in text.split("  "):
-            wrapped.extend(textwrap.wrap(paragraph.strip(), width=80) or [""])
-        wrapped = wrapped[:42] or ["DigAgent report"]
-        stream_lines = ["BT", "/F1 11 Tf", "50 790 Td", "14 TL"]
-        for line in wrapped:
-            safe = line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-            stream_lines.append(f"({safe}) Tj")
-            stream_lines.append("T*")
-        stream_lines.append("ET")
-        stream = "\n".join(stream_lines).encode("latin-1", errors="replace")
-
-        objects = [
-            b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
-            b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
-            b"3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj",
-            b"4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj",
-            f"5 0 obj << /Length {len(stream)} >> stream\n".encode("latin-1") + stream + b"\nendstream endobj",
-        ]
-
-        pdf = bytearray(b"%PDF-1.4\n")
-        offsets = [0]
-        for obj in objects:
-            offsets.append(len(pdf))
-            pdf.extend(obj)
-            pdf.extend(b"\n")
-        xref_offset = len(pdf)
-        pdf.extend(f"xref\n0 {len(objects) + 1}\n".encode("latin-1"))
-        pdf.extend(b"0000000000 65535 f \n")
-        for offset in offsets[1:]:
-            pdf.extend(f"{offset:010d} 00000 n \n".encode("latin-1"))
-        pdf.extend(
-            (
-                f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\n"
-                f"startxref\n{xref_offset}\n%%EOF\n"
-            ).encode("latin-1")
-        )
-        return bytes(pdf)
+        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=120)
+        if not output_path.exists():
+            raise RuntimeError(f"PDF renderer completed without creating output: {output_path}")
+        return output_path.read_bytes()

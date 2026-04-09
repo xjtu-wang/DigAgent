@@ -4,12 +4,15 @@ provider: openai-compatible
 model: ${MODEL}
 system_prompt_file: config/prompts/sisyphus.md
 tool_allowlist:
+  - delegate_subagent
   - repo_search
   - web_fetch
   - shell_exec
   - report_export
   - skill_consult
   - vuln_kb_lookup
+  - memory_search
+  - memory_get
 network_scope: []
 filesystem_scope: []
 runtime_budget:

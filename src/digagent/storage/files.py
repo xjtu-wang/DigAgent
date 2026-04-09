@@ -46,6 +46,7 @@ class FileStorage:
             "reports",
             "artifacts/blob",
             "skills",
+            "plugins",
             "tools",
             "agents",
             "CVE/raw",
@@ -296,6 +297,8 @@ class FileStorage:
         ensure_parent(path)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(f"## {note.heading}\n\n")
+            handle.write(f"source_session_id: {note.source_session_id}\n")
+            handle.write(f"source_run_id: {note.source_run_id}\n\n")
             handle.write(note.body.strip() + "\n\n")
             if note.evidence_refs:
                 handle.write("Evidence: " + ", ".join(f"`{ref}`" for ref in note.evidence_refs) + "\n\n")

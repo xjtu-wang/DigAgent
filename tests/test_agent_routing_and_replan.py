@@ -318,12 +318,16 @@ async def test_profile_driven_agents_are_used(manager, repo_root):
     )
     completed = await wait_for_run(manager, turn.run_id, statuses={"completed", "failed"})
     assert completed.status.value == "completed"
+    run = manager.storage.find_run(turn.run_id)
+    solve_node = next(node for node in run.task_graph.nodes if node.node_id == "solve")
     assert calls["planner"] == ["prometheus-planner"]
     assert calls["scheduler"]
     assert all(profile == "prometheus-planner" for profile in calls["scheduler"])
     assert "hackey-ctf" in calls["subagent"]
     assert calls["writer"] == ["report-writer"]
     assert calls["curator"] == ["memory-curator"]
+    assert solve_node.action_request["name"] == "delegate_subagent"
+    assert solve_node.owner_profile_name == "hackey-ctf"
 
 
 def test_subagent_routing_requires_explicit_owner(manager):

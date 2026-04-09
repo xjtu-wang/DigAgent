@@ -138,9 +138,13 @@ def test_api_session_routes_and_catalog(app, manager):
     assert any(profile["name"] == "report-writer" for profile in catalog["profiles"])
     assert any(profile["name"] == "memory-curator" for profile in catalog["profiles"])
     assert any(tool["name"] == "repo_search" for tool in catalog["tools"])
+    assert any(tool["name"] == "memory_search" for tool in catalog["tools"])
+    assert any(tool["name"] == "memory_get" for tool in catalog["tools"])
     assert all(tool["name"] != "crypto_helper" for tool in catalog["tools"])
     assert all("executor_adapter" in tool for tool in catalog["tools"])
     assert any(skill["name"] == "ctf-sandbox-orchestrator" for skill in catalog["skills"])
+    assert any(plugin["plugin_id"] == "ctf-sandbox-orchestrator" for plugin in catalog["plugins"])
+    assert catalog["capabilities"]["memory"] == "layered_memory_with_scoped_search"
 
     async def run_and_wait():
         session = manager.create_session(title="ctf", profile_name="sisyphus-default")
@@ -154,3 +158,19 @@ def test_api_session_routes_and_catalog(app, manager):
     session_id, run_id = asyncio.run(run_and_wait())
     assert session_id in manager.event_history
     assert any(event.run_id == run_id and event.type == "completed" for event in manager.event_history[session_id])
+
+
+@pytest.mark.asyncio
+async def test_memory_search_retrieval_is_scoped(manager):
+    session = manager.create_session(title="memory search", profile_name="sisyphus-default")
+    _, turn = await manager.handle_message(
+        session_id=session.session_id,
+        content="一道密码学 CTF 题：一只小羊翻过了 2 个栅栏 `fa{fe13f590lg6d46d0d0}`",
+    )
+    completed = await wait_for_run(manager, turn.run_id)
+    assert completed.status.value == "completed"
+
+    search = manager.tools.memory_search({"query": "flag rail fence", "session_id": session.session_id, "scope": "session", "limit": 3})
+    assert search.structured_facts[0]["value"] >= 1
+    payload = search.raw_output
+    assert "memory:" in payload or "wiki:" in payload or "daily:" in payload

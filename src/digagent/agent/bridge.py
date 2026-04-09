@@ -97,6 +97,10 @@ class AgentBridge:
         scope: dict[str, Any] | Scope | None = None,
         followup_messages: list[str] | None = None,
         tool_allowlist: list[str] | None = None,
+        available_specialists: list[str] | None = None,
+        available_plugins: list[dict[str, Any]] | None = None,
+        available_skills: list[str] | None = None,
+        memory_hits: list[dict[str, Any]] | None = None,
     ) -> PlanningBundle:
         normalized_scope = scope if isinstance(scope, Scope) else Scope.model_validate(scope or {})
         if self._is_test_mode():
@@ -117,17 +121,21 @@ class AgentBridge:
             "task_graph must contain run_id, nodes, and edges.\n"
             "Each node must include node_id, title, kind, status, description, summary, metadata.\n"
             "Valid kinds: input, tool, skill, subagent, aggregate, report, export.\n"
-            "Every subagent node must include owner_profile_name.\n"
+            "Every subagent node must include owner_profile_name and it must come from allowed_specialists.\n"
             "If clarification is required, create an input node in waiting_user_input and set metadata.question.\n"
             "If execution can proceed, keep the graph minimal and auditable. End with aggregate -> report -> export.\n"
             "Use prometheus-planner as planner only. Choose specialist owners explicitly on each subagent node.\n"
-            "Use tool manifests and skill bundles already available to the runtime. Avoid inventing unavailable tools.\n"
+            "Use only tools, skills, specialists, and plugins that appear in the provided registries.\n"
             "planner_message must be natural Chinese and tell the user what you understood and what happens next.\n"
             "clarify_message should be null unless the graph waits for user input.\n\n"
             f"run_id: {run_id}\n"
             f"scope: {json.dumps(normalized_scope.model_dump(mode='json'), ensure_ascii=False)}\n"
             f"followups: {json.dumps(followup_messages or [], ensure_ascii=False)}\n"
             f"allowed_tools: {json.dumps(tool_allowlist or [], ensure_ascii=False)}\n"
+            f"allowed_specialists: {json.dumps(available_specialists or [], ensure_ascii=False)}\n"
+            f"available_skills: {json.dumps(available_skills or [], ensure_ascii=False)}\n"
+            f"available_plugins: {json.dumps(available_plugins or [], ensure_ascii=False)}\n"
+            f"memory_hits: {json.dumps(memory_hits or [], ensure_ascii=False)}\n"
             f"task: {task}"
         )
         try:
@@ -401,7 +409,7 @@ class AgentBridge:
         run_status: str | None,
         graph: dict[str, Any] | None,
         evidence_summaries: list[str],
-        memory_context: dict[str, Any],
+        memory_hits: list[dict[str, Any]],
         pending_approvals: int,
         awaiting_reason: str | None,
         budget: dict[str, Any] | None = None,
@@ -413,7 +421,7 @@ class AgentBridge:
                 run_status=run_status,
                 graph=graph or {},
                 evidence_summaries=evidence_summaries,
-                memory_context=memory_context,
+                memory_hits=memory_hits,
                 pending_approvals=pending_approvals,
                 awaiting_reason=awaiting_reason,
                 budget=budget or {},
@@ -430,7 +438,7 @@ class AgentBridge:
             f"run_status: {run_status}\n"
             f"graph: {json.dumps(graph or {}, ensure_ascii=False)}\n"
             f"evidence: {json.dumps(evidence_summaries, ensure_ascii=False)}\n"
-            f"memory: {json.dumps(memory_context, ensure_ascii=False)}\n"
+            f"memory_hits: {json.dumps(memory_hits, ensure_ascii=False)}\n"
             f"pending_approvals: {pending_approvals}\n"
             f"awaiting_reason: {awaiting_reason}\n"
             f"budget: {json.dumps(budget or {}, ensure_ascii=False)}"
@@ -972,7 +980,7 @@ class AgentBridge:
         run_status: str | None,
         graph: dict[str, Any],
         evidence_summaries: list[str],
-        memory_context: dict[str, Any],
+        memory_hits: list[dict[str, Any]],
         pending_approvals: int,
         awaiting_reason: str | None,
         budget: dict[str, Any],
@@ -999,8 +1007,8 @@ class AgentBridge:
             lines.append(f"阻塞原因：{awaiting_reason}")
         if evidence_summaries:
             lines.append("最近证据：" + "；".join(evidence_summaries[:3]) + "。")
-        if memory_context.get("memory_items"):
-            lines.append("相关长期记忆：" + "；".join(memory_context["memory_items"][:2]) + "。")
+        if memory_hits:
+            lines.append("相关长期记忆：" + "；".join(hit.get("summary", "") for hit in memory_hits[:2]) + "。")
         if pending_approvals:
             lines.append(f"当前还有 {pending_approvals} 个待审批动作。")
         if budget:

@@ -8,6 +8,8 @@ tool_allowlist:
   - web_fetch
   - skill_consult
   - vuln_kb_lookup
+  - memory_search
+  - memory_get
 network_scope: []
 filesystem_scope: []
 runtime_budget:

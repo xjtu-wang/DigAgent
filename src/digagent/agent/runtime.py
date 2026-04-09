@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,10 +24,11 @@ from digagent.models import (
     CVERecord,
     DailyMemoryNote,
     EvidenceRecord,
+    DelegationGrant,
     IntentProfile,
-    Finding,
     GraphEditOp,
     GraphOpType,
+    MemoryHit,
     MessageRoute,
     MessageRoutingDecision,
     MemoryRecord,
@@ -53,13 +55,15 @@ from digagent.models import (
     TaskNodeStatus,
     UserTurnDisposition,
     UserTurnResult,
-    WikiClaim,
     WikiEntry,
 )
 from digagent.permission import PermissionEngine
+from digagent.plugins import PluginCatalog
 from digagent.report import ReportExporter
+from digagent.report.validator import ReportValidationError, ReportValidator
 from digagent.skills import SkillCatalog
 from digagent.storage import FileStorage
+from digagent.storage.memory_search import MemorySearchEngine
 from digagent.tools import ToolExecutionResult, ToolRegistry
 from digagent.utils import action_digest, new_id, normalize_domain, utc_now
 
@@ -241,13 +245,22 @@ class SessionManager:
         self.settings = settings or get_settings()
         self.storage = FileStorage(self.settings)
         self.cve = CveKnowledgeBase(self.settings, self.storage)
-        self.tools = ToolRegistry(self.settings, self.cve)
+        self.plugins = PluginCatalog(self.settings)
+        self.memory_search = MemorySearchEngine(self.storage)
+        self.tools = ToolRegistry(
+            self.settings,
+            self.cve,
+            storage=self.storage,
+            memory_search=self.memory_search,
+            plugins=self.plugins,
+        )
         self.permissions = PermissionEngine(
             self.settings,
             registered_actions=self.tools.registered_action_names(),
         )
         self.skills = SkillCatalog(self.settings)
         self.reporter = ReportExporter(self.settings)
+        self.report_validator = ReportValidator()
         self.agent = AgentBridge(self.settings)
         self.profiles = load_profiles(self.settings)
         self.graphs = GraphManager()
@@ -260,11 +273,16 @@ class SessionManager:
             "profiles": [profile.model_dump(mode="json", exclude={"system_prompt"}) for profile in self.profiles.values()],
             "tools": self.tools.catalog(),
             "skills": [skill.model_dump(mode="json", exclude={"markdown"}) for skill in self.skills.load_all().values()],
+            "plugins": self.plugins.catalog(),
             "cve": self.cve.state().model_dump(mode="json"),
             "capabilities": {
                 "planner": "llm_driven_dag",
-                "memory": "layered_openclaw_style",
+                "memory": "layered_memory_with_scoped_search",
                 "report_writer": "dedicated_writer_agent",
+            },
+            "memory_capabilities": {
+                "search": "bm25_scoped_retrieval",
+                "get": "ref_based_lookup",
             },
         }
 
@@ -1073,6 +1091,17 @@ class SessionManager:
 
         if node.kind == TaskNodeKind.SUBAGENT:
             latest = self.storage.find_run(run.run_id)
+            existing_grant = node.metadata.get("delegation_grant")
+            if existing_grant:
+                action = ActionRequest.model_validate(node.metadata["delegation_action"])
+                grant = DelegationGrant.model_validate(existing_grant)
+            else:
+                action = self._build_action_for_node(run, node)
+                blocked = await self._authorize_action(run, session, node, action, auto_approve=auto_approve)
+                if blocked:
+                    return None
+                latest = self.storage.find_run(run.run_id)
+                grant = self._ensure_delegation_grant(latest, node, action)
             latest.budget_usage.active_subagents += 1
             self.storage.save_run(latest)
             await self._emit_budget_update(session.session_id, latest)
@@ -1081,22 +1110,16 @@ class SessionManager:
                 evidence = self.storage.load_evidence(evidence_id)
                 evidence_summaries.append(f"{evidence.title}: {evidence.summary}")
             profile_name = self._subagent_profile_name(node)
-            node.owner_profile_name = profile_name
-            profile = self.profiles[profile_name]
             task = SubagentTask(
                 task_id=new_id("subtask"),
                 run_id=latest.run_id,
                 node_id=node.node_id,
                 goal=node.description,
+                grant_id=grant.grant_id,
                 evidence_summaries=evidence_summaries,
-                allowed_tools=profile.tool_allowlist,
-                allowed_paths=latest.scope.repo_paths,
-                allowed_domains=latest.scope.allowed_domains,
-            )
-            prompt = (
-                f"Goal: {task.goal}\n\n"
-                f"Evidence:\n- " + "\n- ".join(task.evidence_summaries or ["No evidence yet"]) + "\n\n"
-                "Return a concise expert summary and next actions."
+                allowed_tools=grant.allowed_tools,
+                allowed_paths=grant.allowed_paths,
+                allowed_domains=grant.allowed_domains,
             )
             return {
                 "kind": node.kind.value,
@@ -1105,7 +1128,8 @@ class SessionManager:
                 "node_id": node.node_id,
                 "profile_name": profile_name,
                 "task": task,
-                "prompt": prompt,
+                "grant": grant.model_dump(mode="json"),
+                "auto_approve": auto_approve,
             }
 
         return None
@@ -1114,7 +1138,7 @@ class SessionManager:
         if item["kind"] == TaskNodeKind.TOOL.value:
             action = item["action"]
             return await self.tools.execute(action.name, action.arguments)
-        return await self.agent.run_text_task(profile_name=item["profile_name"], task=item["prompt"])
+        return await self._run_subagent_worker(item)
 
     async def _finalize_external_node(self, item: dict[str, Any], result: Any) -> bool:
         run = self.storage.find_run(item["run_id"])
@@ -1139,36 +1163,38 @@ class SessionManager:
         await self._emit_budget_update(session.session_id, run)
         if isinstance(result, Exception):
             return await self._handle_node_execution_error(run, session, node, result)
-
+        if isinstance(result, dict) and result.get("status") == "paused":
+            return True
+        subagent = SubagentResult.model_validate(result)
         profile = self.profiles[item["profile_name"]]
         artifact = self.storage.save_artifact(
             session_id=session.session_id,
             run_id=run.run_id,
             kind="stdout",
-            content=result,
+            content=subagent.summary,
             mime_type="text/plain",
             suffix=".txt",
         )
-        subagent = SubagentResult(
-            subagent_id=new_id("sub"),
-            status="completed",
-            summary=result,
-            evidence_ids=run.evidence_ids[-5:],
-            artifact_ids=[artifact.artifact_id],
-            recommended_next_actions=self._next_action_titles(run, node.node_id),
-            memory_candidates=[],
-        )
+        subagent.artifact_ids = [artifact.artifact_id]
         evidence = self._create_evidence(
             run=run,
             title=f"Subagent Result: {profile.name}",
-            summary=result,
+            summary=subagent.summary,
             evidence_type="subagent_result",
             source={"tool_name": "subagent", "agent_id": profile.name},
             artifact_ids=[artifact.artifact_id],
-            content=result,
-            facts=[{"key": "subagent_id", "value": subagent.subagent_id}],
+            content=subagent.summary,
+            facts=[
+                {"key": "subagent_id", "value": subagent.subagent_id},
+                {"key": "executed_action_count", "value": len(subagent.executed_action_ids)},
+            ],
         )
+        subagent.evidence_ids = [*subagent.evidence_ids, evidence.evidence_id]
         self._attach_node_outputs(run, node, artifact_ids=[artifact.artifact_id], evidence_ids=[evidence.evidence_id], summary=subagent.summary)
+        delegation = node.metadata.get("delegation_action", node.action_request or {})
+        if delegation:
+            node.action_request = delegation
+            node.action_id = delegation.get("action_id")
         self.storage.save_run(run)
         self.storage.append_audit(
             session.session_id,
@@ -1176,8 +1202,8 @@ class SessionManager:
                 event_id=new_id("audit"),
                 timestamp=utc_now(),
                 run_id=run.run_id,
-                action_id=new_id("act"),
-                actor_agent_id=profile.name,
+                action_id=str(delegation.get("action_id") or new_id("act")),
+                actor_agent_id=run.root_agent_id,
                 decision=PermissionDecision.ALLOW,
                 executor="subagent_runner",
                 result="success",
@@ -1245,16 +1271,7 @@ class SessionManager:
         if blocked:
             return True
         manifest = self.skills.load(node.metadata["skill_name"])
-        bundle_parts = [manifest.markdown]
-        if manifest.references:
-            bundle_parts.append("## Bundle References\n" + "\n".join(f"- {path}" for path in manifest.references))
-        if manifest.agent_config_path:
-            bundle_parts.append(
-                "## Agent Interface\n"
-                f"- config: {manifest.agent_config_path}\n"
-                f"- implicit_invocation: {str(manifest.allow_implicit_invocation).lower()}"
-            )
-        bundle_text = "\n\n".join(part for part in bundle_parts if part)
+        bundle_text = self._skill_bundle_text(manifest)
         artifact = self.storage.save_artifact(
             session_id=session.session_id,
             run_id=run.run_id,
@@ -1267,7 +1284,7 @@ class SessionManager:
             run=run,
             title=f"Skill Loaded: {manifest.name}",
             summary=manifest.description,
-            evidence_type="user_input",
+            evidence_type="skill_context",
             source={
                 "tool_name": "skill_consult",
                 "path": manifest.path,
@@ -1327,104 +1344,256 @@ class SessionManager:
         return False
 
     async def _execute_subagent_node(self, run: RunRecord, session: SessionRecord, node: TaskNode) -> bool:
-        run.budget_usage.active_subagents += 1
-        self.storage.save_run(run)
-        await self._emit_budget_update(session.session_id, run)
-        try:
-            evidence_summaries: list[str] = []
-            skill_contexts: list[str] = []
-            for evidence_id in run.evidence_ids[-5:]:
-                evidence = self.storage.load_evidence(evidence_id)
-                evidence_summaries.append(f"{evidence.title}: {evidence.summary}")
-                if evidence.source.get("tool_name") == "skill_consult" and evidence.artifact_refs:
-                    try:
-                        content = self.storage.load_artifact_bytes(evidence.artifact_refs[0]).decode("utf-8", errors="ignore")
-                    except OSError:
-                        content = ""
-                    if content:
-                        skill_contexts.append(content[:1800])
-            profile_name = self._subagent_profile_name(node)
-            node.owner_profile_name = profile_name
-            profile = self.profiles[profile_name]
-            goal = node.description
-            if node.metadata.get("task_mode") == "ctf_solve":
-                goal += " 明确区分最终 flag 和仅供参考的 candidate；如果可以确定最终 flag，请直接给出。"
-            task = SubagentTask(
-                task_id=new_id("subtask"),
-                run_id=run.run_id,
-                node_id=node.node_id,
-                goal=goal,
-                evidence_summaries=evidence_summaries,
-                allowed_tools=profile.tool_allowlist,
-                allowed_paths=run.scope.repo_paths,
-                allowed_domains=run.scope.allowed_domains,
-            )
-            prompt = (
-                f"Task: {run.user_task}\n\n"
-                f"Goal: {task.goal}\n\n"
-                f"Evidence:\n- " + "\n- ".join(task.evidence_summaries or ["No evidence yet"]) + "\n\n"
-                + ("Skill context:\n" + "\n\n".join(skill_contexts) + "\n\n" if skill_contexts else "")
-                + "Return a concise expert summary and next actions."
-            )
-            text = await self.agent.run_text_task(profile_name=profile.name, task=prompt)
-            artifact = self.storage.save_artifact(
-                session_id=session.session_id,
-                run_id=run.run_id,
-                kind="stdout",
-                content=text,
-                mime_type="text/plain",
-                suffix=".txt",
-            )
-            subagent = SubagentResult(
-                subagent_id=new_id("sub"),
-                status="completed",
-                summary=text,
-                evidence_ids=run.evidence_ids[-5:],
-                artifact_ids=[artifact.artifact_id],
-                recommended_next_actions=self._next_action_titles(run, node.node_id),
-                memory_candidates=[],
-            )
-            evidence = self._create_evidence(
-                run=run,
-                title=f"Subagent Result: {profile.name}",
-                summary=text,
-                evidence_type="subagent_result",
-                source={"tool_name": "subagent", "agent_id": profile.name},
-                artifact_ids=[artifact.artifact_id],
-                content=text,
-                facts=[{"key": "subagent_id", "value": subagent.subagent_id}],
-            )
-            self._attach_node_outputs(run, node, artifact_ids=[artifact.artifact_id], evidence_ids=[evidence.evidence_id], summary=subagent.summary)
-            self.storage.append_audit(
-                session.session_id,
-                AuditEvent(
-                    event_id=new_id("audit"),
-                    timestamp=utc_now(),
-                    run_id=run.run_id,
-                    action_id=new_id("act"),
-                    actor_agent_id=profile.name,
-                    decision=PermissionDecision.ALLOW,
-                    executor="subagent_runner",
-                    result="success",
-                    artifact_ids=[artifact.artifact_id],
-                    evidence_ids=[evidence.evidence_id],
-                    detail=subagent.summary,
-                    node_id=node.node_id,
-                ),
-            )
-            await self.emit(
-                session.session_id,
-                run.run_id,
-                "subagent",
-                {"task": task.model_dump(mode="json"), "result": subagent.model_dump(mode="json")},
-            )
-            await self._complete_node(run, session, node.node_id)
-            return False
-        finally:
+        prepared = await self._prepare_external_node(run, session, node, auto_approve=False)
+        if prepared is None:
             latest = self.storage.find_run(run.run_id)
-            latest.budget_usage.active_subagents = max(0, latest.budget_usage.active_subagents - 1)
-            self.storage.save_run(latest)
-            await self._emit_budget_update(session.session_id, latest)
+            return latest.status in TERMINAL_RUN_STATES or latest.status in {
+                RunStatus.AWAITING_APPROVAL,
+                RunStatus.AWAITING_USER_INPUT,
+            }
+        result = await self._run_prepared_external_node(prepared)
+        return await self._finalize_external_node(prepared, result)
+
+    def _ensure_delegation_grant(self, run: RunRecord, node: TaskNode, action: ActionRequest) -> DelegationGrant:
+        existing = node.metadata.get("delegation_grant")
+        if existing:
+            grant = DelegationGrant.model_validate(existing)
+            node.grant_id = grant.grant_id
+            return grant
+        owner = self._subagent_profile_name(node)
+        root_profile = self.profiles[run.profile_name]
+        worker_profile = self.profiles[owner]
+        allowed_tools = self._dedupe(
+            [
+                name
+                for name in root_profile.tool_allowlist
+                if name in worker_profile.tool_allowlist and name not in {"delegate_subagent", "report_export", "skill_consult"}
+            ]
+        )
+        grant = DelegationGrant(
+            grant_id=new_id("grant"),
+            parent_action_id=action.action_id,
+            run_id=run.run_id,
+            node_id=node.node_id,
+            delegator_profile_name=run.profile_name,
+            delegatee_profile_name=owner,
+            allowed_tools=allowed_tools,
+            allowed_paths=list(run.scope.repo_paths),
+            allowed_domains=list(run.scope.allowed_domains),
+            max_tool_calls=min(root_profile.runtime_budget.max_tool_calls, worker_profile.runtime_budget.max_tool_calls),
+            expires_at=None,
+        )
+        node.owner_profile_name = owner
+        node.grant_id = grant.grant_id
+        node.metadata["delegation_action"] = action.model_dump(mode="json")
+        node.metadata["delegation_grant"] = grant.model_dump(mode="json")
+        node.metadata.setdefault("worker_history", [])
+        node.metadata.setdefault("worker_action_ids", [])
+        return grant
+
+    async def _run_subagent_worker(self, item: dict[str, Any]) -> SubagentResult | dict[str, Any]:
+        run = self.storage.find_run(item["run_id"])
+        session = self.storage.load_session(run.session_id)
+        node = self._task_node(run, item["node_id"])
+        if node is None:
+            raise RuntimeError("subagent node disappeared before execution")
+        grant = DelegationGrant.model_validate(item["grant"])
+        history = list(node.metadata.get("worker_history", []))
+        executed_ids = list(node.metadata.get("worker_action_ids", []))
+        resumed = await self._resume_worker_action(run, session, node, grant, history, executed_ids)
+        if resumed is not None:
+            return resumed
+        if self.settings.digagent_use_fake_model:
+            summary = await self.agent.run_text_task(profile_name=item["profile_name"], task=self._subagent_summary_prompt(item["task"], history))
+            return self._subagent_result(run, node, summary, executed_ids)
+        return await self._drive_subagent_worker(run, session, node, item["task"], grant, history, executed_ids)
+
+    async def _resume_worker_action(
+        self,
+        run: RunRecord,
+        session: SessionRecord,
+        node: TaskNode,
+        grant: DelegationGrant,
+        history: list[dict[str, Any]],
+        executed_ids: list[str],
+    ) -> dict[str, Any] | None:
+        payload = node.metadata.get("worker_pending_action")
+        if not payload:
+            return None
+        action = ActionRequest.model_validate(payload)
+        result = await self._execute_worker_tool_action(run, session, node, grant, action)
+        if isinstance(result, dict):
+            return result
+        self._record_worker_step(run, node, history, executed_ids, action, result)
+        return None
+
+    async def _drive_subagent_worker(
+        self,
+        run: RunRecord,
+        session: SessionRecord,
+        node: TaskNode,
+        task: SubagentTask,
+        grant: DelegationGrant,
+        history: list[dict[str, Any]],
+        executed_ids: list[str],
+    ) -> SubagentResult | dict[str, Any]:
+        max_turns = max(1, grant.max_tool_calls + 1)
+        for _ in range(max_turns):
+            prompt = self._subagent_worker_prompt(run, task, grant, history)
+            raw = await self.agent.run_text_task(profile_name=grant.delegatee_profile_name, task=prompt)
+            payload = json.loads(raw)
+            if payload.get("type") == "final":
+                return self._subagent_result(run, node, str(payload.get("summary") or ""), executed_ids, payload)
+            action = self._build_worker_action(run, node, grant, payload)
+            result = await self._execute_worker_tool_action(run, session, node, grant, action)
+            if isinstance(result, dict):
+                return result
+            self._record_worker_step(run, node, history, executed_ids, action, result)
+        raise RuntimeError("subagent exhausted delegated tool budget without returning a final answer")
+
+    def _subagent_worker_prompt(
+        self,
+        run: RunRecord,
+        task: SubagentTask,
+        grant: DelegationGrant,
+        history: list[dict[str, Any]],
+    ) -> str:
+        return (
+            "Return only JSON.\n"
+            "You are a delegated specialist worker inside a controlled runtime.\n"
+            "Allowed outputs:\n"
+            '1) {"type":"tool_call","tool_name":"...","arguments":{...},"justification":"..."}\n'
+            '2) {"type":"final","summary":"...","recommended_next_actions":["..."]}\n'
+            "Use only tools from allowed_tools. Do not ask for nested delegation. Do not write reports or memory.\n\n"
+            f"user_task: {run.user_task}\n"
+            f"goal: {task.goal}\n"
+            f"allowed_tools: {json.dumps(grant.allowed_tools, ensure_ascii=False)}\n"
+            f"evidence: {json.dumps(task.evidence_summaries, ensure_ascii=False)}\n"
+            f"history: {json.dumps(history, ensure_ascii=False)}"
+        )
+
+    def _subagent_summary_prompt(self, task: SubagentTask, history: list[dict[str, Any]]) -> str:
+        return (
+            f"Task: {task.goal}\n\n"
+            f"Evidence:\n- " + "\n- ".join(task.evidence_summaries or ["No evidence yet"]) + "\n\n"
+            + (f"History:\n{json.dumps(history, ensure_ascii=False)}\n\n" if history else "")
+            + "Return a concise expert summary and next actions."
+        )
+
+    def _build_worker_action(
+        self,
+        run: RunRecord,
+        node: TaskNode,
+        grant: DelegationGrant,
+        payload: dict[str, Any],
+    ) -> ActionRequest:
+        tool_name = str(payload.get("tool_name") or "")
+        if tool_name not in grant.allowed_tools:
+            raise RuntimeError(f"subagent requested disallowed tool '{tool_name}'")
+        manifest = self.tools.load(tool_name)
+        arguments = dict(payload.get("arguments") or {})
+        inferred = self._infer_action_targets(tool_name, arguments)
+        default_targets = manifest.default_targets.model_dump(mode="json")
+        return ActionRequest(
+            action_id=new_id("act"),
+            run_id=run.run_id,
+            actor_agent_id=grant.delegatee_profile_name,
+            action_type=ActionType.TOOL,
+            name=tool_name,
+            arguments=arguments,
+            targets=ActionTargets(
+                paths=self._dedupe(default_targets.get("paths", []) + inferred["paths"]),
+                domains=self._dedupe(default_targets.get("domains", []) + inferred["domains"]),
+            ),
+            justification=str(payload.get("justification") or node.description),
+            risk_tags=manifest.risk_tags,
+            created_at=utc_now(),
+            node_id=node.node_id,
+        )
+
+    async def _execute_worker_tool_action(
+        self,
+        run: RunRecord,
+        session: SessionRecord,
+        node: TaskNode,
+        grant: DelegationGrant,
+        action: ActionRequest,
+    ) -> ToolExecutionResult | dict[str, Any]:
+        node.metadata["worker_pending_action"] = action.model_dump(mode="json")
+        self.storage.save_run(run)
+        blocked = await self._authorize_action(
+            run,
+            session,
+            node,
+            action,
+            actor_profile_name=grant.delegatee_profile_name,
+            scope_override=Scope(repo_paths=grant.allowed_paths, allowed_domains=grant.allowed_domains),
+        )
+        if blocked:
+            return {"status": "paused"}
+        latest = self.storage.find_run(run.run_id)
+        latest.budget_usage.active_tools += 1
+        self.storage.save_run(latest)
+        await self._emit_budget_update(session.session_id, latest)
+        try:
+            result = await self.tools.execute(action.name, action.arguments)
+        finally:
+            refreshed = self.storage.find_run(run.run_id)
+            refreshed.budget_usage.active_tools = max(0, refreshed.budget_usage.active_tools - 1)
+            self.storage.save_run(refreshed)
+            await self._emit_budget_update(session.session_id, refreshed)
+        await self._record_tool_success(run.run_id, node.node_id, action, result)
+        return result
+
+    def _record_worker_step(
+        self,
+        run: RunRecord,
+        node: TaskNode,
+        history: list[dict[str, Any]],
+        executed_ids: list[str],
+        action: ActionRequest,
+        result: ToolExecutionResult,
+    ) -> None:
+        executed_ids.append(action.action_id)
+        history.append({"tool": action.name, "summary": result.summary})
+        latest = self.storage.find_run(run.run_id)
+        current = self._task_node(latest, node.node_id)
+        if current is None:
+            return
+        current.metadata["worker_history"] = history
+        current.metadata["worker_action_ids"] = executed_ids
+        current.metadata.pop("worker_pending_action", None)
+        self.storage.save_run(latest)
+
+    def _subagent_result(
+        self,
+        run: RunRecord,
+        node: TaskNode,
+        summary: str,
+        executed_ids: list[str],
+        payload: dict[str, Any] | None = None,
+    ) -> SubagentResult:
+        return SubagentResult(
+            subagent_id=new_id("sub"),
+            status="completed",
+            summary=summary,
+            evidence_ids=run.evidence_ids[-5:],
+            artifact_ids=[],
+            recommended_next_actions=list((payload or {}).get("recommended_next_actions") or self._next_action_titles(run, node.node_id)),
+            executed_action_ids=executed_ids,
+            memory_candidates=[],
+        )
+
+    def _infer_action_targets(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, list[str]]:
+        if tool_name == "repo_search":
+            return {"paths": [str(path) for path in arguments.get("repo_paths", [])], "domains": []}
+        if tool_name == "web_fetch":
+            hostname = urlparse(str(arguments.get("url") or "")).hostname
+            return {"paths": [], "domains": [hostname] if hostname else []}
+        if tool_name == "shell_exec":
+            cwd = str(arguments.get("cwd") or self.settings.workspace_root)
+            return {"paths": [cwd], "domains": []}
+        return {"paths": [], "domains": []}
 
     async def _execute_aggregate_node(self, run: RunRecord, session: SessionRecord, node: TaskNode) -> bool:
         summaries = [self.storage.load_evidence(ev).summary for ev in run.evidence_ids[-6:]]
@@ -1473,8 +1642,11 @@ class SessionManager:
 
     async def _execute_report_node(self, run: RunRecord, session: SessionRecord, node: TaskNode) -> bool:
         dossier = self._build_report_dossier(run)
-        draft = await self.agent.write_report(profile_name=self._writer_profile().name, dossier=dossier)
-        validated = self._validate_report_draft(draft, dossier)
+        try:
+            validated = await self._validated_report_draft(dossier)
+        except Exception as exc:
+            await self._fail_run(run, session, f"report generation failed: {exc}", node_id=node.node_id)
+            return True
         report = self._report_from_draft(run, validated)
         markdown = self.reporter.render_markdown(report)
         report.export_paths["markdown"] = str(self.storage.report_markdown_path(report.report_id))
@@ -1519,7 +1691,11 @@ class SessionManager:
         if blocked:
             return True
         pdf_path = self.storage.report_pdf_path(run.report_id)
-        pdf_bytes = self.reporter.export_pdf(html_path, pdf_path)
+        try:
+            pdf_bytes = self.reporter.export_pdf(html_path, pdf_path)
+        except Exception as exc:
+            await self._fail_run(run, session, f"pdf export failed: {exc}", node_id=node.node_id)
+            return True
         report.export_paths["pdf"] = str(pdf_path)
         markdown = markdown_path.read_text(encoding="utf-8")
         self.storage.save_report(report, markdown, pdf_bytes=pdf_bytes)
@@ -1615,11 +1791,13 @@ class SessionManager:
         node: TaskNode,
         action: ActionRequest,
         *,
+        actor_profile_name: str | None = None,
+        scope_override: Scope | None = None,
         auto_approve: bool = False,
     ) -> bool:
-        profile = self.profiles[run.profile_name]
+        profile = self.profiles[actor_profile_name or run.profile_name]
         self._refresh_budget_usage(run)
-        outcome = self.permissions.decide(action, profile, run.scope, run.budget_usage)
+        outcome = self.permissions.decide(action, profile, scope_override or run.scope, run.budget_usage)
         node.action_request = action.model_dump(mode="json")
         node.action_id = action.action_id
         node.metadata["permission_reason"] = outcome.reason
@@ -1801,6 +1979,28 @@ class SessionManager:
                 created_at=utc_now(),
                 node_id=node.node_id,
             )
+        if node.kind == TaskNodeKind.SUBAGENT:
+            owner = self._subagent_profile_name(node)
+            return ActionRequest(
+                action_id=new_id("act"),
+                run_id=run.run_id,
+                actor_agent_id=run.root_agent_id,
+                action_type=ActionType.SUBAGENT,
+                name="delegate_subagent",
+                arguments={
+                    "owner_profile_name": owner,
+                    "goal": node.description,
+                    "title": node.title,
+                },
+                justification=node.description,
+                targets=ActionTargets(
+                    paths=list(run.scope.repo_paths),
+                    domains=list(run.scope.allowed_domains),
+                ),
+                risk_tags=node.metadata.get("risk_tags", []),
+                created_at=utc_now(),
+                node_id=node.node_id,
+            )
         raise ValueError(f"Unsupported task node for action: {node.kind}")
 
     def _create_evidence(
@@ -1970,6 +2170,7 @@ class SessionManager:
     def _build_report_dossier(self, run: RunRecord) -> ReportDossier:
         evidences = [self.storage.load_evidence(evidence_id) for evidence_id in run.evidence_ids]
         artifacts = [self.storage.load_artifact(artifact_id) for artifact_id in run.artifact_ids]
+        memory_hits = self._memory_hits_for_query(run.user_task, session_id=run.session_id, run_id=run.run_id)
         completed_nodes = []
         if run.task_graph:
             completed_nodes = [
@@ -1989,48 +2190,29 @@ class SessionManager:
             scope=run.scope,
             intent_profile=run.intent_profile,
             task_graph=run.task_graph or TaskGraph(run_id=run.run_id),
+            goal_summary=run.intent_profile.objective if run.intent_profile else run.user_task,
             completed_nodes=completed_nodes,
+            completed_node_kinds=[node["kind"] for node in completed_nodes],
+            source_evidence_types=sorted({evidence.type for evidence in evidences}),
             evidence=[evidence.model_dump(mode="json") for evidence in evidences],
             artifacts=[artifact.model_dump(mode="json") for artifact in artifacts[:12]],
-            memory_context=self._memory_context(),
+            retrieved_memory=[hit.model_dump(mode="json") for hit in memory_hits],
             followup_messages=run.followup_messages,
         )
 
     def _validate_report_draft(self, draft: ReportDraft, dossier: ReportDossier) -> ReportDraft:
-        valid_refs = {item["evidence_id"] for item in dossier.evidence if item.get("evidence_id")}
-        findings: list[Finding] = []
-        for finding in draft.findings:
-            refs = [ref for ref in finding.evidence_refs if ref in valid_refs]
-            if not refs:
-                refs = list(valid_refs)[:2]
-            findings.append(
-                Finding(
-                    finding_id=finding.finding_id or new_id("fd"),
-                    title=finding.title,
-                    severity=finding.severity,
-                    confidence=finding.confidence,
-                    claim=finding.claim,
-                    evidence_refs=refs,
-                    reproduction_steps=finding.reproduction_steps,
-                    remediation=finding.remediation,
-                )
-            )
-        allowed_kinds = {"writeup", "pentest_report", "code_review_report", "analysis_note"}
-        kind = draft.kind if draft.kind in allowed_kinds else "analysis_note"
-        evidence_refs = [ref for ref in draft.evidence_refs if ref in valid_refs]
-        if not evidence_refs:
-            evidence_refs = list(valid_refs)[:6]
-        limitations = draft.limitations or []
+        validated = self.report_validator.validate(draft, dossier)
+        limitations = validated.limitations
         if dossier.followup_messages:
             limitations = limitations + ["已合并用户补充要求：" + "；".join(dossier.followup_messages)]
         return ReportDraft(
-            kind=kind,
-            title=draft.title or self._report_title(dossier, kind),
-            summary=draft.summary or "已根据当前证据生成阶段性报告。",
-            findings=findings,
+            kind=validated.kind,
+            title=validated.title or self._report_title(dossier, validated.kind),
+            summary=validated.summary,
+            findings=validated.findings,
             limitations=limitations,
-            writer_summary=draft.writer_summary or "我已基于当前证据和任务图完成报告整理。",
-            evidence_refs=evidence_refs,
+            writer_summary=validated.writer_summary or "我已基于当前证据和任务图完成报告整理。",
+            evidence_refs=validated.evidence_refs,
         )
 
     def _report_from_draft(self, run: RunRecord, draft: ReportDraft) -> ReportRecord:
@@ -2052,6 +2234,23 @@ class SessionManager:
             evidence_refs=draft.evidence_refs,
             generated_at=utc_now(),
         )
+
+    async def _validated_report_draft(self, dossier: ReportDossier) -> ReportDraft:
+        writer = self._writer_profile().name
+        draft = await self.agent.write_report(profile_name=writer, dossier=dossier)
+        try:
+            return self._validate_report_draft(draft, dossier)
+        except ReportValidationError as exc:
+            retry_dossier = dossier.model_copy(
+                update={
+                    "followup_messages": [
+                        *dossier.followup_messages,
+                        f"validator_feedback: {exc}",
+                    ]
+                }
+            )
+            retried = await self.agent.write_report(profile_name=writer, dossier=retry_dossier)
+            return self._validate_report_draft(retried, dossier)
 
     def _report_title(self, dossier: ReportDossier, kind: str) -> str:
         objective = dossier.intent_profile.objective if dossier.intent_profile else dossier.user_task
@@ -2192,6 +2391,7 @@ class SessionManager:
         return first_line[:60]
 
     async def _build_direct_answer(self, session: SessionRecord, run: RunRecord | None, content: str) -> str:
+        memory_hits = self._memory_hits_for_query(content, session_id=session.session_id, run_id=run.run_id if run else None)
         if run:
             graph = run.task_graph.model_dump(mode="json") if run.task_graph else {}
             return await self.agent.compose_direct_answer(
@@ -2201,7 +2401,7 @@ class SessionManager:
                 run_status=run.status.value,
                 graph=graph,
                 evidence_summaries=self._recent_evidence_summaries(run),
-                memory_context=self._memory_context(),
+                memory_hits=[hit.model_dump(mode="json") for hit in memory_hits],
                 pending_approvals=len(session.pending_approval_ids),
                 awaiting_reason=run.awaiting_reason,
                 budget={
@@ -2222,7 +2422,7 @@ class SessionManager:
             run_status=None,
             graph={},
             evidence_summaries=evidence_summaries,
-            memory_context=self._memory_context(),
+            memory_hits=[hit.model_dump(mode="json") for hit in memory_hits],
             pending_approvals=len(session.pending_approval_ids),
             awaiting_reason=None,
             budget={},
@@ -2246,6 +2446,7 @@ class SessionManager:
 
     async def _plan_bundle(self, run: RunRecord):
         planner = self._planner_profile()
+        memory_hits = self._memory_hits_for_query(run.user_task, session_id=run.session_id, run_id=run.run_id)
         result = await self.agent.plan_task_graph(
             run_id=run.run_id,
             profile_name=planner.name,
@@ -2253,6 +2454,10 @@ class SessionManager:
             scope=run.scope.model_dump(mode="json"),
             followup_messages=run.followup_messages,
             tool_allowlist=planner.tool_allowlist,
+            available_specialists=self._available_specialist_profiles(),
+            available_plugins=self.plugins.catalog(),
+            available_skills=sorted(self.skills.load_all()),
+            memory_hits=[hit.model_dump(mode="json") for hit in memory_hits],
         )
         bundle = self._normalize_planning_result(run, result)
         for node in bundle.task_graph.nodes:
@@ -2264,6 +2469,9 @@ class SessionManager:
     def _subagent_profile_name(self, node: TaskNode) -> str:
         explicit = node.owner_profile_name or node.metadata.get("profile_name") or node.metadata.get("profile")
         if explicit:
+            if explicit not in self._available_specialist_profiles():
+                allowed = ", ".join(self._available_specialist_profiles())
+                raise ValueError(f"subagent node '{node.node_id}' uses unsupported owner_profile_name '{explicit}'. Allowed: {allowed}")
             return explicit
         raise ValueError(f"subagent node '{node.node_id}' is missing owner_profile_name")
 
@@ -2348,15 +2556,51 @@ class SessionManager:
             summaries.append(f"{evidence.title}: {evidence.summary}")
         return summaries
 
-    def _memory_context(self) -> dict[str, Any]:
-        memory_items = [memory.summary for memory in self.storage.list_memories()[:5]]
-        wiki_items = [entry.summary for entry in self.storage.list_wiki_entries()[:5]]
-        long_term = self.storage.load_memory_markdown()
-        return {
-            "memory_items": memory_items,
-            "wiki_items": wiki_items,
-            "memory_markdown_excerpt": long_term[:1200],
-        }
+    def _skill_bundle_text(self, manifest) -> str:
+        parts = [manifest.markdown]
+        references = self._skill_reference_snippets(manifest)
+        if references:
+            parts.append("## References\n\n" + "\n\n".join(references))
+        if manifest.agent_config_path:
+            parts.append(
+                "## Agent Interface\n"
+                f"- config: {manifest.agent_config_path}\n"
+                f"- implicit_invocation: {str(manifest.allow_implicit_invocation).lower()}"
+            )
+        return "\n\n".join(part for part in parts if part)
+
+    def _skill_reference_snippets(self, manifest) -> list[str]:
+        skill_root = Path(manifest.path).parent
+        snippets: list[str] = []
+        for relative in manifest.references[:6]:
+            path = skill_root / relative
+            if not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8", errors="ignore").strip()
+            except OSError:
+                continue
+            if not text:
+                continue
+            snippets.append(f"### {relative}\n{text[:2200]}")
+        return snippets
+
+    def _memory_hits_for_query(self, query: str, *, session_id: str, run_id: str | None) -> list[MemoryHit]:
+        return self.memory_search.search(
+            query=query,
+            session_id=session_id,
+            run_id=run_id,
+            scope="session",
+            sensitivity="normal",
+            limit=5,
+        )
+
+    def _available_specialist_profiles(self) -> list[str]:
+        return sorted(
+            name
+            for name in self.profiles
+            if name not in {PLANNER_PROFILE, WRITER_PROFILE, CURATOR_PROFILE, "sisyphus-default"}
+        )
 
     def _normalize_planning_result(self, run: RunRecord, planning_result: Any):
         if hasattr(planning_result, "task_graph") and hasattr(planning_result, "intent_profile"):

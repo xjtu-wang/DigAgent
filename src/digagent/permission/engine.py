@@ -26,6 +26,7 @@ HIGH_RISK_TAGS = {
 }
 
 REGISTERED_SYSTEM_ACTIONS = {
+    "delegate_subagent",
     "skill_consult",
     "report_export",
 }

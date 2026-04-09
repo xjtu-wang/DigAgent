@@ -7,6 +7,8 @@ tool_allowlist:
   - skill_consult
   - shell_exec
   - vuln_kb_lookup
+  - memory_search
+  - memory_get
 network_scope: []
 filesystem_scope: []
 runtime_budget:

@@ -169,6 +169,9 @@ class TaskNode(DigAgentModel):
     replanned_from_node_id: str | None = None
     superseded_by: str | None = None
     owner_profile_name: str | None = None
+    grant_id: str | None = None
+    plugin_id: str | None = None
+    command_name: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     is_active: bool = False
 
@@ -290,6 +293,20 @@ class ActionRequest(DigAgentModel):
     expected_artifacts: list[str] = Field(default_factory=list)
     created_at: str
     node_id: str | None = None
+
+
+class DelegationGrant(DigAgentModel):
+    grant_id: str
+    parent_action_id: str
+    run_id: str
+    node_id: str
+    delegator_profile_name: str
+    delegatee_profile_name: str
+    allowed_tools: list[str] = Field(default_factory=list)
+    allowed_paths: list[str] = Field(default_factory=list)
+    allowed_domains: list[str] = Field(default_factory=list)
+    max_tool_calls: int = 0
+    expires_at: str | None = None
 
 
 class PermissionOutcome(DigAgentModel):
@@ -510,10 +527,13 @@ class ReportDossier(DigAgentModel):
     scope: Scope
     intent_profile: IntentProfile | None = None
     task_graph: TaskGraph
+    goal_summary: str | None = None
     completed_nodes: list[dict[str, Any]] = Field(default_factory=list)
+    completed_node_kinds: list[str] = Field(default_factory=list)
+    source_evidence_types: list[str] = Field(default_factory=list)
     evidence: list[dict[str, Any]] = Field(default_factory=list)
     artifacts: list[dict[str, Any]] = Field(default_factory=list)
-    memory_context: dict[str, Any] = Field(default_factory=dict)
+    retrieved_memory: list[dict[str, Any]] = Field(default_factory=list)
     followup_messages: list[str] = Field(default_factory=list)
 
 
@@ -548,6 +568,30 @@ class ToolManifest(DigAgentModel):
     executor_adapter: str
 
 
+class PluginCommandManifest(DigAgentModel):
+    plugin_id: str
+    name: str
+    description: str
+    action_type: ActionType = ActionType.TOOL
+    risk_tags: list[str] = Field(default_factory=list)
+    default_targets: ActionTargets = Field(default_factory=ActionTargets)
+    executor_adapter: str
+    script_path: str | None = None
+    arguments_schema: dict[str, Any] = Field(default_factory=dict)
+
+
+class PluginManifest(DigAgentModel):
+    plugin_id: str
+    name: str
+    description: str
+    path: str
+    version: str | None = None
+    bundled_skills: list[str] = Field(default_factory=list)
+    commands: list[PluginCommandManifest] = Field(default_factory=list)
+    references: list[str] = Field(default_factory=list)
+    agent_config_path: str | None = None
+
+
 class SkillManifest(DigAgentModel):
     name: str
     description: str
@@ -572,10 +616,33 @@ class SubagentTask(DigAgentModel):
     run_id: str
     node_id: str
     goal: str
+    grant_id: str | None = None
     evidence_summaries: list[str] = Field(default_factory=list)
     allowed_tools: list[str] = Field(default_factory=list)
     allowed_paths: list[str] = Field(default_factory=list)
     allowed_domains: list[str] = Field(default_factory=list)
+
+
+class MemorySearchQuery(DigAgentModel):
+    query: str
+    session_id: str | None = None
+    run_id: str | None = None
+    scope: str = "session"
+    sensitivity: str = "normal"
+    limit: int = 5
+
+
+class MemoryHit(DigAgentModel):
+    ref: str
+    source_type: str
+    title: str
+    summary: str
+    content: str
+    score: float
+    sensitivity: str = "low"
+    source_session_id: str | None = None
+    source_run_id: str | None = None
+    updated_at: str | None = None
 
 
 class CVERecord(DigAgentModel):
@@ -655,6 +722,7 @@ class SubagentResult(DigAgentModel):
     evidence_ids: list[str] = Field(default_factory=list)
     artifact_ids: list[str] = Field(default_factory=list)
     recommended_next_actions: list[str] = Field(default_factory=list)
+    executed_action_ids: list[str] = Field(default_factory=list)
     memory_candidates: list[dict[str, Any]] = Field(default_factory=list)
 
 

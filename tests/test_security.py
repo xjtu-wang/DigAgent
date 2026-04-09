@@ -112,6 +112,19 @@ async def test_approval_digest_mismatch_blocks_execution(manager):
     assert "digest" in (failed.error_message or "")
 
 
+@pytest.mark.asyncio
+async def test_pdf_export_failure_is_explicit(manager):
+    manager.reporter.export_pdf = lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("renderer crashed"))
+    session = manager.create_session(title="export failure", profile_name="sisyphus-default")
+    _, turn = await manager.handle_message(
+        session_id=session.session_id,
+        content="一道密码学 CTF 题：一只小羊翻过了 2 个栅栏 `fa{fe13f590lg6d46d0d0}`",
+    )
+    failed = await wait_for_run(manager, turn.run_id, statuses={"completed", "failed"})
+    assert failed.status.value == "failed"
+    assert "pdf export failed" in (failed.error_message or "")
+
+
 def test_skill_cannot_bypass_permission(tmp_path, test_settings):
     marker = tmp_path / "owned.txt"
     skill_dir = test_settings.data_dir / "skills" / "malicious-skill"
