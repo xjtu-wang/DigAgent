@@ -27,6 +27,8 @@ from digagent.models import (
     Finding,
     GraphEditOp,
     GraphOpType,
+    MessageRoute,
+    MessageRoutingDecision,
     MemoryRecord,
     MemoryPromotionCandidate,
     MessageRecord,
@@ -49,7 +51,6 @@ from digagent.models import (
     TaskNode,
     TaskNodeKind,
     TaskNodeStatus,
-    TaskType,
     UserTurnDisposition,
     UserTurnResult,
     WikiClaim,
@@ -69,31 +70,11 @@ TERMINAL_RUN_STATES = {
     RunStatus.TIMED_OUT,
 }
 
-PROCESS_QUESTION_MARKERS = {
-    "进度",
-    "状态",
-    "证据",
-    "发现",
-    "下一步",
-    "为什么",
-    "审批",
-    "原因",
-    "summary",
-    "status",
-    "evidence",
-    "approval",
-    "plan",
-    "graph",
-}
-
 APPROVE_MARKERS = {"批准", "同意", "approve", "approved", "yes", "继续", "通过"}
 REJECT_MARKERS = {"拒绝", "不同意", "reject", "rejected", "deny", "no"}
-CANCEL_MARKERS = {"取消", "停止", "终止", "cancel", "stop"}
 PLANNER_PROFILE = "prometheus-planner"
 WRITER_PROFILE = "report-writer"
 CURATOR_PROFILE = "memory-curator"
-DEFAULT_SPECIALIST_PROFILE = "hephaestus-deepworker"
-CTF_SPECIALIST_PROFILE = "hackey-ctf"
 CLARIFY_SUPERSEDED_REASON = "superseded after clarification"
 
 
@@ -393,10 +374,9 @@ class SessionManager:
         *,
         title: str,
         profile_name: str = "sisyphus-default",
-        task_type: str = TaskType.GENERAL.value,
         scope: Scope | None = None,
     ) -> SessionRecord:
-        return self.storage.create_session(title, profile_name, task_type, scope or Scope())
+        return self.storage.create_session(title, profile_name, scope or Scope())
 
     async def handle_message(
         self,
@@ -453,28 +433,36 @@ class SessionManager:
 
         active_run = self._active_run(session)
 
-        if active_run and self._is_cancel_request(content):
-            return session, await self._cancel_run(session, active_run, user_message)
-
-        if self._is_process_question(content):
-            answer = await self._build_direct_answer(session, active_run, content)
-            return session, await self._direct_answer(
-                session,
-                answer,
-                user_message=user_message,
-                run_id=active_run.run_id if active_run else None,
-            )
-
         if active_run:
-            if active_run.status == RunStatus.AWAITING_APPROVAL and self._looks_like_approval_response(content):
+            route = await self._classify_message(session, active_run, content)
+            if route.route == MessageRoute.CANCEL:
+                return session, await self._cancel_run(session, active_run, user_message)
+            if route.route == MessageRoute.DIRECT_ANSWER:
+                answer = await self._build_direct_answer(session, active_run, content)
+                return session, await self._direct_answer(
+                    session,
+                    answer,
+                    user_message=user_message,
+                    run_id=active_run.run_id,
+                )
+            if route.route == MessageRoute.APPROVAL_RESPONSE and active_run.status == RunStatus.AWAITING_APPROVAL:
                 result = await self._continue_approval_from_message(session, active_run, content, user_message)
                 return self.storage.load_session(session.session_id), result
-            if active_run.status == RunStatus.AWAITING_USER_INPUT:
+            if route.route == MessageRoute.CLARIFICATION_INPUT and active_run.status == RunStatus.AWAITING_USER_INPUT:
                 result = await self._continue_with_user_input(session, active_run, content, user_message, auto_approve=auto_approve)
                 return self.storage.load_session(session.session_id), result
             return session, await self._reject_message(
                 session,
                 reason="当前 session 已有未完成 run。请等待完成、取消，或先处理审批/补充信息。",
+                user_message=user_message,
+            )
+
+        route = await self._classify_message(session, None, content)
+        if route.route == MessageRoute.DIRECT_ANSWER:
+            answer = await self._build_direct_answer(session, None, content)
+            return session, await self._direct_answer(
+                session,
+                answer,
                 user_message=user_message,
             )
 
@@ -531,7 +519,6 @@ class SessionManager:
                 run.intent_profile = planning.intent_profile
                 run.planner_summary = planning.planner_message
                 session.intent_profile = planning.intent_profile
-                session.task_type = planning.intent_profile.labels[0] if planning.intent_profile.labels else session.task_type
                 self.graphs.refresh(run.task_graph)
                 self.storage.save_run(run)
                 self.storage.save_session(session)
@@ -783,7 +770,6 @@ class SessionManager:
             session_id=session.session_id,
             profile_name=profile_name,
             task=primary,
-            task_type=session.task_type,
             scope=effective_scope,
             budget=self.profiles[profile_name].runtime_budget,
             trigger_message_id=user_message.message_id,
@@ -886,7 +872,6 @@ class SessionManager:
 
         clarify_node_id = waiting_node.node_id if waiting_node else None
         run.followup_messages.append(content)
-        run.user_task = f"{run.user_task}\n补充信息：{content}"
         run.scope = self._enrich_scope(content, run.scope)
         run.awaiting_reason = None
         run.status = RunStatus.CREATED
@@ -910,14 +895,13 @@ class SessionManager:
         session.last_intent_type = UserTurnDisposition.CONTINUE_RUN.value
         self.storage.save_session(session)
 
-        await self._append_assistant_message(session.session_id, run.run_id, "已收到补充信息，继续执行当前 run。")
         self.run_tasks[run.run_id] = asyncio.create_task(self.execute_run(run.run_id, auto_approve=auto_approve))
         return UserTurnResult(
             disposition=UserTurnDisposition.CONTINUE_RUN,
             session_id=session.session_id,
             run_id=run.run_id,
             message_id=user_message.message_id,
-            assistant_message="已收到补充信息，继续执行当前 run。",
+            assistant_message=run.planner_summary or "已收到补充信息，继续执行当前 run。",
         )
 
     async def _cancel_run(self, session: SessionRecord, run: RunRecord, user_message: MessageRecord) -> UserTurnResult:
@@ -1096,7 +1080,7 @@ class SessionManager:
             for evidence_id in latest.evidence_ids[-5:]:
                 evidence = self.storage.load_evidence(evidence_id)
                 evidence_summaries.append(f"{evidence.title}: {evidence.summary}")
-            profile_name = self._subagent_profile_name(latest, node)
+            profile_name = self._subagent_profile_name(node)
             node.owner_profile_name = profile_name
             profile = self.profiles[profile_name]
             task = SubagentTask(
@@ -1359,7 +1343,7 @@ class SessionManager:
                         content = ""
                     if content:
                         skill_contexts.append(content[:1800])
-            profile_name = self._subagent_profile_name(run, node)
+            profile_name = self._subagent_profile_name(node)
             node.owner_profile_name = profile_name
             profile = self.profiles[profile_name]
             goal = node.description
@@ -2031,10 +2015,8 @@ class SessionManager:
                     remediation=finding.remediation,
                 )
             )
-        inferred_kind = self._infer_report_kind(dossier)
-        kind = draft.kind if draft.kind in {"writeup", "pentest_report", "code_review_report", "analysis_note"} else inferred_kind
-        if kind != inferred_kind and inferred_kind == "writeup":
-            kind = inferred_kind
+        allowed_kinds = {"writeup", "pentest_report", "code_review_report", "analysis_note"}
+        kind = draft.kind if draft.kind in allowed_kinds else "analysis_note"
         evidence_refs = [ref for ref in draft.evidence_refs if ref in valid_refs]
         if not evidence_refs:
             evidence_refs = list(valid_refs)[:6]
@@ -2071,42 +2053,10 @@ class SessionManager:
             generated_at=utc_now(),
         )
 
-    def _infer_report_kind(self, dossier: ReportDossier) -> str:
-        labels = set((dossier.intent_profile.labels if dossier.intent_profile else []) or [])
-        if "ctf" in labels or self._best_flag_candidate_from_payloads(dossier.evidence):
-            return "writeup"
-        if "web_analysis" in labels or self._first_fact_value_from_payloads(dossier.evidence, "status_code") is not None:
-            return "pentest_report"
-        if "code_review" in labels or any(item.get("source", {}).get("tool_name") == "repo_search" for item in dossier.evidence):
-            return "code_review_report"
-        return "analysis_note"
-
     def _report_title(self, dossier: ReportDossier, kind: str) -> str:
         objective = dossier.intent_profile.objective if dossier.intent_profile else dossier.user_task
         compact = re.sub(r"\s+", " ", objective).strip()
         return compact[:80] or f"DigAgent {kind}"
-
-    def _best_flag_candidate_from_payloads(self, evidence_payloads: list[dict[str, Any]]) -> str | None:
-        fake_run = RunRecord(
-            run_id="report-probe",
-            session_id="probe",
-            profile_name="sisyphus-default",
-            status=RunStatus.COMPLETED,
-            task_type=TaskType.GENERAL,
-            user_task="probe",
-            created_at=utc_now(),
-            updated_at=utc_now(),
-        )
-        evidences = [EvidenceRecord.model_validate(item) for item in evidence_payloads]
-        value, _ = self._best_ctf_flag_candidate(fake_run, evidences)
-        return value
-
-    def _first_fact_value_from_payloads(self, evidence_payloads: list[dict[str, Any]], key: str) -> Any:
-        for evidence in evidence_payloads:
-            for fact in evidence.get("structured_facts", []):
-                if fact.get("key") == key:
-                    return fact.get("value")
-        return None
 
     def _enrich_scope(self, task: str, scope: Scope) -> Scope:
         merged = Scope.model_validate(scope.model_dump(mode="json"))
@@ -2209,19 +2159,23 @@ class SessionManager:
             return None
         return run
 
-    def _is_process_question(self, content: str) -> bool:
-        lower = content.lower()
-        if any(marker in lower for marker in PROCESS_QUESTION_MARKERS):
-            return True
-        return content.strip().endswith("?") or content.strip().endswith("？")
-
-    def _is_cancel_request(self, content: str) -> bool:
-        lower = content.lower()
-        return any(marker in lower for marker in CANCEL_MARKERS)
-
-    def _looks_like_approval_response(self, content: str) -> bool:
-        lower = content.lower()
-        return any(marker in lower for marker in APPROVE_MARKERS | REJECT_MARKERS)
+    async def _classify_message(
+        self,
+        session: SessionRecord,
+        run: RunRecord | None,
+        content: str,
+    ) -> MessageRoutingDecision:
+        graph = run.task_graph.model_dump(mode="json") if run and run.task_graph else {}
+        pending_question = run.awaiting_reason if run else session.pending_user_question
+        return await self.agent.classify_message(
+            profile_name=self._planner_profile().name,
+            user_message=content,
+            session_status=session.status.value,
+            run_status=run.status.value if run else None,
+            graph=graph,
+            pending_question=pending_question,
+            pending_approvals=len(session.pending_approval_ids),
+        )
 
     def _message_is_approval(self, content: str) -> bool:
         lower = content.lower()
@@ -2257,48 +2211,26 @@ class SessionManager:
             )
 
         report_id = session.latest_report_id or session.last_report_id
+        evidence_summaries: list[str] = []
         if report_id:
             report = self.storage.load_report(report_id)
-            return await self.agent.compose_direct_answer(
-                profile_name=session.root_agent_profile,
-                user_question=content,
-                session_status=session.status.value,
-                run_status=None,
-                graph={},
-                evidence_summaries=[report.summary],
-                memory_context=self._memory_context(),
-                pending_approvals=len(session.pending_approval_ids),
-                awaiting_reason=None,
-                budget={},
-            )
-        memory_context = self._memory_context()
-        if memory_context.get("memory_items"):
-            return await self.agent.compose_direct_answer(
-                profile_name=session.root_agent_profile,
-                user_question=content,
-                session_status=session.status.value,
-                run_status=None,
-                graph={},
-                evidence_summaries=[],
-                memory_context=memory_context,
-                pending_approvals=len(session.pending_approval_ids),
-                awaiting_reason=None,
-                budget={},
-            )
-        return "当前 session 没有活跃 run，也没有待处理审批。"
+            evidence_summaries.append(report.summary)
+        return await self.agent.compose_direct_answer(
+            profile_name=session.root_agent_profile,
+            user_question=content,
+            session_status=session.status.value,
+            run_status=None,
+            graph={},
+            evidence_summaries=evidence_summaries,
+            memory_context=self._memory_context(),
+            pending_approvals=len(session.pending_approval_ids),
+            awaiting_reason=None,
+            budget={},
+        )
 
     async def _build_archived_answer(self, session: SessionRecord, content: str) -> str:
-        report_id = session.latest_report_id or session.last_report_id
-        if self._is_process_question(content):
-            base = await self._build_direct_answer(session, None, content)
-            return base + "\n这个 session 目前处于 archived，我可以继续解释历史证据和报告，但不会直接启动新的 run。"
-        if report_id:
-            report = self.storage.load_report(report_id)
-            return (
-                f"这个 session 已归档。我可以继续帮你解读历史内容，比如报告 {report.report_id}《{report.title}》、证据和审批记录。"
-                "如果你想继续执行新任务，先恢复 session 即可。"
-            )
-        return "这个 session 已归档。我可以继续答疑和解释历史上下文，但不会在归档状态下直接启动新 run。"
+        base = await self._build_direct_answer(session, None, content)
+        return base + "\n这个 session 目前处于 archived，我可以继续解释历史证据和报告，但不会直接启动新的 run。"
 
     def _profile(self, profile_name: str):
         return self.profiles[profile_name]
@@ -2325,27 +2257,15 @@ class SessionManager:
         bundle = self._normalize_planning_result(run, result)
         for node in bundle.task_graph.nodes:
             node.planning_phase = max(node.planning_phase, 0)
-            if node.kind == TaskNodeKind.SUBAGENT and not node.owner_profile_name:
-                node.owner_profile_name = self._subagent_profile_name(run, node, bundle.intent_profile)
+            if node.kind == TaskNodeKind.SUBAGENT:
+                node.owner_profile_name = self._subagent_profile_name(node)
         return bundle
 
-    def _subagent_profile_name(
-        self,
-        run: RunRecord,
-        node: TaskNode,
-        intent_profile: IntentProfile | None = None,
-    ) -> str:
+    def _subagent_profile_name(self, node: TaskNode) -> str:
         explicit = node.owner_profile_name or node.metadata.get("profile_name") or node.metadata.get("profile")
         if explicit:
             return explicit
-        role = str(node.metadata.get("agent_role") or "").strip()
-        profile = intent_profile or run.intent_profile
-        labels = set((profile.labels if profile else []) or [])
-        if role == "ctf_specialist" or "ctf" in labels:
-            return CTF_SPECIALIST_PROFILE
-        if role == "deepworker" or labels & {"code_review", "web_analysis"}:
-            return DEFAULT_SPECIALIST_PROFILE
-        return DEFAULT_SPECIALIST_PROFILE
+        raise ValueError(f"subagent node '{node.node_id}' is missing owner_profile_name")
 
     async def _replan_after_user_input(
         self,
@@ -2441,41 +2361,7 @@ class SessionManager:
     def _normalize_planning_result(self, run: RunRecord, planning_result: Any):
         if hasattr(planning_result, "task_graph") and hasattr(planning_result, "intent_profile"):
             return planning_result
-        if isinstance(planning_result, TaskGraph):
-            labels = self._infer_labels_from_graph(planning_result, run.user_task)
-            return type("PlanningCompat", (), {
-                "task_graph": planning_result,
-                "intent_profile": IntentProfile(
-                    objective=run.user_task[:120],
-                    labels=labels,
-                    report_kind_hint=self._report_hint_from_labels(labels),
-                    confidence=0.55,
-                ),
-                "planner_message": "已根据当前上下文生成任务图，开始执行。",
-                "clarify_message": None,
-            })()
-        raise TypeError("planner must return PlanningBundle or TaskGraph")
-
-    def _infer_labels_from_graph(self, graph: TaskGraph, task: str) -> list[str]:
-        labels: list[str] = []
-        tool_names = {node.metadata.get("tool_name") for node in graph.nodes}
-        skill_names = {node.metadata.get("skill_name") for node in graph.nodes}
-        if "web_fetch" in tool_names:
-            labels.append("web_analysis")
-        if "repo_search" in tool_names:
-            labels.append("code_review")
-        if any("ctf" in str(name or "") for name in skill_names) or self._extract_flag_candidates(task):
-            labels.insert(0, "ctf")
-        return labels or ["general"]
-
-    def _report_hint_from_labels(self, labels: list[str]) -> str:
-        if "ctf" in labels:
-            return "writeup"
-        if "web_analysis" in labels:
-            return "pentest_report"
-        if "code_review" in labels:
-            return "code_review_report"
-        return "analysis_note"
+        raise TypeError("planner must return PlanningBundle")
 
     def _approval_digest(self, action: ActionRequest) -> str:
         return action_digest(

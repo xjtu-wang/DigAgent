@@ -5,9 +5,6 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
-from deepagents import create_deep_agent
-from deepagents.backends.state import StateBackend
-from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 
 from digagent.config import AppSettings, get_settings, load_profiles
@@ -17,6 +14,8 @@ from digagent.models import (
     Finding,
     GraphEditOp,
     IntentProfile,
+    MessageRoute,
+    MessageRoutingDecision,
     PlanningBundle,
     ReportDossier,
     ReportDraft,
@@ -43,6 +42,9 @@ class AgentBridge:
             raise KeyError(f"Unknown agent profile '{profile_name}'. Available: {available}")
         return self.profiles[profile_name]
 
+    def _is_test_mode(self) -> bool:
+        return self.settings.digagent_use_fake_model
+
     def _chat_model(self, *, profile_name: str | None = None) -> ChatOpenAI:
         profile = self._profile(profile_name) if profile_name else None
         if not self.settings.can_use_model:
@@ -62,27 +64,16 @@ class AgentBridge:
         system_prompt: str | None = None,
     ) -> str:
         resolved_prompt = system_prompt or self._profile(profile_name or "sisyphus-default").system_prompt
-        if not self.settings.can_use_model:
-            return self._fake_response(task)
-
-        try:
-            agent = create_deep_agent(
-                model=self._chat_model(profile_name=profile_name),
-                tools=[],
-                system_prompt=resolved_prompt,
-                backend=lambda rt: StateBackend(rt),
-            )
-            result = await agent.ainvoke({"messages": [HumanMessage(content=task)]})
-            return self._extract_output(result)
-        except Exception:
-            model = self._chat_model(profile_name=profile_name)
-            result = await model.ainvoke(
-                [
-                    ("system", resolved_prompt),
-                    ("user", task),
-                ]
-            )
-            return getattr(result, "content", str(result))
+        if self._is_test_mode():
+            return self._test_response(task)
+        model = self._chat_model(profile_name=profile_name)
+        result = await model.ainvoke(
+            [
+                ("system", resolved_prompt),
+                ("user", task),
+            ]
+        )
+        return getattr(result, "content", str(result))
 
     def _extract_output(self, result: Any) -> str:
         if isinstance(result, dict):
@@ -108,14 +99,15 @@ class AgentBridge:
         tool_allowlist: list[str] | None = None,
     ) -> PlanningBundle:
         normalized_scope = scope if isinstance(scope, Scope) else Scope.model_validate(scope or {})
-        fallback = self.build_fallback_planning_bundle(
-            run_id=run_id,
-            task=task,
-            scope=normalized_scope,
-            followup_messages=followup_messages,
-        )
+        if self._is_test_mode():
+            return self.build_test_planning_bundle(
+                run_id=run_id,
+                task=task,
+                scope=normalized_scope,
+                followup_messages=followup_messages,
+            )
         if not self.settings.can_use_model:
-            return fallback
+            raise RuntimeError("planner model configuration is unavailable")
 
         prompt = (
             "Return only JSON.\n"
@@ -125,9 +117,10 @@ class AgentBridge:
             "task_graph must contain run_id, nodes, and edges.\n"
             "Each node must include node_id, title, kind, status, description, summary, metadata.\n"
             "Valid kinds: input, tool, skill, subagent, aggregate, report, export.\n"
+            "Every subagent node must include owner_profile_name.\n"
             "If clarification is required, create an input node in waiting_user_input and set metadata.question.\n"
             "If execution can proceed, keep the graph minimal and auditable. End with aggregate -> report -> export.\n"
-            "Prefer skills for CTF challenges, repo_search for code exploration, and web_fetch for site observation.\n"
+            "Use prometheus-planner as planner only. Choose specialist owners explicitly on each subagent node.\n"
             "Use tool manifests and skill bundles already available to the runtime. Avoid inventing unavailable tools.\n"
             "planner_message must be natural Chinese and tell the user what you understood and what happens next.\n"
             "clarify_message should be null unless the graph waits for user input.\n\n"
@@ -150,8 +143,50 @@ class AgentBridge:
             if waiting and not bundle.clarify_message:
                 bundle.clarify_message = self._clarify_question(waiting[0])
             return bundle
-        except Exception:
-            return fallback
+        except Exception as exc:
+            raise RuntimeError(f"planner failed: {exc}") from exc
+
+    async def classify_message(
+        self,
+        *,
+        profile_name: str,
+        user_message: str,
+        session_status: str,
+        run_status: str | None,
+        graph: dict[str, Any] | None,
+        pending_question: str | None,
+        pending_approvals: int,
+    ) -> MessageRoutingDecision:
+        if self._is_test_mode():
+            return self._classify_message_for_tests(
+                user_message=user_message,
+                session_status=session_status,
+                run_status=run_status,
+                pending_question=pending_question,
+                pending_approvals=pending_approvals,
+            )
+        if not self.settings.can_use_model:
+            raise RuntimeError("message router model configuration is unavailable")
+        prompt = (
+            "Return only JSON.\n"
+            "Classify the latest user message for a session-driven agent.\n"
+            "Allowed route values: direct_answer, clarification_input, approval_response, cancel, new_run_request.\n"
+            "Use clarification_input only when the message clearly answers the pending clarification question.\n"
+            "Use direct_answer for conceptual Q&A, progress/status questions, or explanatory follow-up that should not mutate the task graph.\n"
+            "Use new_run_request only when the user is asking to start or switch to a different executable task.\n"
+            "Top-level keys: route, rationale.\n\n"
+            f"user_message: {user_message}\n"
+            f"session_status: {session_status}\n"
+            f"run_status: {run_status}\n"
+            f"pending_question: {pending_question}\n"
+            f"pending_approvals: {pending_approvals}\n"
+            f"graph: {json.dumps(graph or {}, ensure_ascii=False)}"
+        )
+        try:
+            text = await self.run_text_task(profile_name=profile_name, task=prompt)
+            return MessageRoutingDecision.model_validate(json.loads(text))
+        except Exception as exc:
+            raise RuntimeError(f"message router failed: {exc}") from exc
 
     async def select_execution_batch(
         self,
@@ -167,14 +202,16 @@ class AgentBridge:
     ) -> ExecutionBatchDecision:
         if not ready_nodes:
             return ExecutionBatchDecision(node_ids=[], planner_message="当前没有可执行节点。")
-        if not self.settings.can_use_model:
-            node_ids = self._fake_batch_selection(ready_nodes, max_parallel_tools=max_parallel_tools, max_parallel_subagents=max_parallel_subagents)
+        if self._is_test_mode():
+            node_ids = self._test_batch_selection(ready_nodes, max_parallel_tools=max_parallel_tools, max_parallel_subagents=max_parallel_subagents)
             names = [node.title for node in ready_nodes if node.node_id in node_ids]
             return ExecutionBatchDecision(
                 node_ids=node_ids,
                 planner_message=f"我先推进这些节点：{'；'.join(names)}。",
                 rationale="offline_selection",
             )
+        if not self.settings.can_use_model:
+            raise RuntimeError("scheduler model configuration is unavailable")
 
         prompt = (
             "Return only JSON.\n"
@@ -198,15 +235,9 @@ class AgentBridge:
             decision.node_ids = [node_id for node_id in decision.node_ids if node_id in allowed]
             if decision.node_ids:
                 return decision
-        except Exception:
-            pass
-        node_ids = self._fake_batch_selection(ready_nodes, max_parallel_tools=max_parallel_tools, max_parallel_subagents=max_parallel_subagents)
-        names = [node.title for node in ready_nodes if node.node_id in node_ids]
-        return ExecutionBatchDecision(
-            node_ids=node_ids,
-            planner_message=f"我先推进这些节点：{'；'.join(names)}。",
-            rationale="fallback_selection",
-        )
+            raise RuntimeError("scheduler returned an empty execution batch")
+        except Exception as exc:
+            raise RuntimeError(f"scheduler failed: {exc}") from exc
 
     async def propose_graph_edits(
         self,
@@ -216,6 +247,8 @@ class AgentBridge:
         graph: dict[str, Any],
         evidence_summaries: list[str],
     ) -> list[GraphEditOp]:
+        if self._is_test_mode():
+            return []
         if not self.settings.can_use_model:
             return []
         prompt = (
@@ -234,8 +267,8 @@ class AgentBridge:
             if not isinstance(payload, list):
                 return []
             return [GraphEditOp.model_validate(item) for item in payload]
-        except Exception:
-            return []
+        except Exception as exc:
+            raise RuntimeError(f"graph replan failed: {exc}") from exc
 
     async def summarize_graph_update(
         self,
@@ -247,12 +280,14 @@ class AgentBridge:
     ) -> str:
         if not ops:
             return "我调整了任务图，接下来会按新的路径继续推进。"
-        if not self.settings.can_use_model:
+        if self._is_test_mode():
             changed = "；".join(
                 op.node_id or (op.node or {}).get("title") or (op.edge.source if op.edge else op.op_type.value)
                 for op in ops[:3]
             )
             return f"我根据新的线索调整了任务图，重点变化是：{changed}。接下来继续执行新的可运行节点。"
+        if not self.settings.can_use_model:
+            raise RuntimeError("planner summary model configuration is unavailable")
         prompt = (
             "用简短自然的中文说明这次任务图更新给用户听。不要列 JSON，不要超过 3 句。\n\n"
             f"task: {task}\n"
@@ -271,8 +306,10 @@ class AgentBridge:
     ) -> str:
         normalized_scope = scope if isinstance(scope, Scope) else Scope.model_validate(scope or {})
         fallback = self._friendly_clarify_question(task, scope=normalized_scope)
-        if not self.settings.can_use_model:
+        if self._is_test_mode():
             return fallback
+        if not self.settings.can_use_model:
+            raise RuntimeError("clarify model configuration is unavailable")
         prompt = (
             "写一句简短自然的中文追问，只索取继续执行这个任务所缺的最小范围信息。"
             "不要拒绝用户，不要分点，不要模板腔。\n\n"
@@ -282,8 +319,8 @@ class AgentBridge:
         try:
             text = (await self.run_text_task(profile_name=profile_name, task=prompt)).strip()
             return text or fallback
-        except Exception:
-            return fallback
+        except Exception as exc:
+            raise RuntimeError(f"clarify generation failed: {exc}") from exc
 
     async def curate_memory(
         self,
@@ -296,8 +333,8 @@ class AgentBridge:
         session_id: str,
         run_id: str,
     ) -> dict[str, Any]:
-        if not self.settings.can_use_model:
-            return self._fake_memory_curation(
+        if self._is_test_mode():
+            return self._test_memory_curation(
                 task=task,
                 intent_profile=intent_profile,
                 report=report,
@@ -305,6 +342,8 @@ class AgentBridge:
                 session_id=session_id,
                 run_id=run_id,
             )
+        if not self.settings.can_use_model:
+            raise RuntimeError("memory curator model configuration is unavailable")
         prompt = (
             "Return only JSON.\n"
             "Curate layered memory for an agent system.\n"
@@ -329,20 +368,14 @@ class AgentBridge:
             payload["memory_candidates"] = payload.get("memory_candidates", [])
             payload["wiki_entries"] = payload.get("wiki_entries", [])
             return payload
-        except Exception:
-            return self._fake_memory_curation(
-                task=task,
-                intent_profile=intent_profile,
-                report=report,
-                evidence=evidence,
-                session_id=session_id,
-                run_id=run_id,
-            )
+        except Exception as exc:
+            raise RuntimeError(f"memory curation failed: {exc}") from exc
 
     async def write_report(self, *, profile_name: str, dossier: ReportDossier) -> ReportDraft:
-        fallback = self._fake_report(dossier)
+        if self._is_test_mode():
+            return self._test_report(dossier)
         if not self.settings.can_use_model:
-            return fallback
+            raise RuntimeError("report writer model configuration is unavailable")
         prompt = (
             "Return only JSON.\n"
             "You are a dedicated report writer.\n"
@@ -356,8 +389,8 @@ class AgentBridge:
             text = await self.run_text_task(profile_name=profile_name, task=prompt)
             draft = ReportDraft.model_validate(json.loads(text))
             return draft
-        except Exception:
-            return fallback
+        except Exception as exc:
+            raise RuntimeError(f"report writer failed: {exc}") from exc
 
     async def compose_direct_answer(
         self,
@@ -373,8 +406,8 @@ class AgentBridge:
         awaiting_reason: str | None,
         budget: dict[str, Any] | None = None,
     ) -> str:
-        if not self.settings.can_use_model:
-            return self._fake_direct_answer(
+        if self._is_test_mode():
+            return self._test_direct_answer(
                 user_question=user_question,
                 session_status=session_status,
                 run_status=run_status,
@@ -385,9 +418,12 @@ class AgentBridge:
                 awaiting_reason=awaiting_reason,
                 budget=budget or {},
             )
+        if not self.settings.can_use_model:
+            raise RuntimeError("direct answer model configuration is unavailable")
         prompt = (
-            "用自然中文回答用户关于当前任务状态的问题。"
-            "只基于当前图状态、最近证据、待审批信息和记忆摘要回答。"
+            "用自然中文回答用户消息。"
+            "如果用户在问当前任务状态、证据、审批或下一步，只基于当前图状态、最近证据、待审批信息和记忆摘要回答。"
+            "如果用户是在问概念解释或术语说明，而且不需要触发新执行，可以直接做简洁答疑。"
             "不要暴露内部实现细节，不要编造。\n\n"
             f"user_question: {user_question}\n"
             f"session_status: {session_status}\n"
@@ -400,19 +436,33 @@ class AgentBridge:
             f"budget: {json.dumps(budget or {}, ensure_ascii=False)}"
         )
         text = (await self.run_text_task(profile_name=profile_name, task=prompt)).strip()
-        return text or self._fake_direct_answer(
-            user_question=user_question,
-            session_status=session_status,
-            run_status=run_status,
-            graph=graph or {},
-            evidence_summaries=evidence_summaries,
-            memory_context=memory_context,
-            pending_approvals=pending_approvals,
-            awaiting_reason=awaiting_reason,
-            budget=budget or {},
-        )
+        if not text:
+            raise RuntimeError("direct answer model returned empty content")
+        return text
 
-    def build_fallback_planning_bundle(
+    def _classify_message_for_tests(
+        self,
+        *,
+        user_message: str,
+        session_status: str,
+        run_status: str | None,
+        pending_question: str | None,
+        pending_approvals: int,
+    ) -> MessageRoutingDecision:
+        lower = user_message.lower()
+        if any(marker in lower for marker in {"取消", "停止", "终止", "cancel", "stop"}):
+            return MessageRoutingDecision(route=MessageRoute.CANCEL, rationale="cancel_request")
+        if pending_approvals and any(marker in lower for marker in {"批准", "同意", "approve", "yes", "继续", "通过", "拒绝", "不同意", "reject", "no"}):
+            return MessageRoutingDecision(route=MessageRoute.APPROVAL_RESPONSE, rationale="approval_reply")
+        explain_markers = {"解释", "介绍", "说明", "什么是", "what is", "why", "为什么"}
+        status_markers = {"进度", "状态", "证据", "发现", "下一步", "审批", "summary", "status", "evidence", "approval"}
+        if any(marker in lower for marker in explain_markers | status_markers) or user_message.strip().endswith(("?", "？")):
+            return MessageRoutingDecision(route=MessageRoute.DIRECT_ANSWER, rationale="qa_message")
+        if run_status == "awaiting_user_input" or session_status == "awaiting_user_input" or pending_question:
+            return MessageRoutingDecision(route=MessageRoute.CLARIFICATION_INPUT, rationale="clarification_reply")
+        return MessageRoutingDecision(route=MessageRoute.NEW_RUN_REQUEST, rationale="new_task")
+
+    def build_test_planning_bundle(
         self,
         *,
         run_id: str,
@@ -420,8 +470,8 @@ class AgentBridge:
         scope: Scope,
         followup_messages: list[str] | None = None,
     ) -> PlanningBundle:
-        intent = self._infer_intent_profile(task, scope)
-        graph = self.build_fallback_task_graph(
+        intent = self._test_intent_profile(task, scope)
+        graph = self.build_test_task_graph(
             run_id=run_id,
             task=task,
             scope=scope,
@@ -430,7 +480,7 @@ class AgentBridge:
         )
         waiting = [node for node in graph.nodes if node.status == TaskNodeStatus.WAITING_USER_INPUT]
         clarify = self._clarify_question(waiting[0]) if waiting else None
-        planner_message = self._fake_planner_message(intent, graph, clarify_message=clarify)
+        planner_message = self._test_planner_message(intent, graph, clarify_message=clarify)
         return PlanningBundle(
             intent_profile=intent,
             task_graph=graph,
@@ -438,7 +488,7 @@ class AgentBridge:
             clarify_message=clarify,
         )
 
-    def build_fallback_task_graph(
+    def build_test_task_graph(
         self,
         *,
         run_id: str,
@@ -447,8 +497,8 @@ class AgentBridge:
         followup_messages: list[str] | None = None,
         intent_profile: IntentProfile | None = None,
     ) -> TaskGraph:
-        intent = intent_profile or self._infer_intent_profile(task, scope)
-        if self._needs_clarification(task, scope, intent):
+        intent = intent_profile or self._test_intent_profile(task, scope)
+        if self._test_needs_clarification(task, scope, intent):
             prompt = self._friendly_clarify_question(task, scope=scope)
             return TaskGraph(
                 run_id=run_id,
@@ -504,7 +554,7 @@ class AgentBridge:
                 metadata={"skill_name": "ctf-sandbox-orchestrator"},
             )
             upstream_node = orchestrator
-            specialist_name = self._ctf_specialist_skill(task)
+            specialist_name = self._test_ctf_specialist_skill(task)
             if specialist_name:
                 specialist = add_node(
                     title="Load routed specialist skill",
@@ -518,13 +568,14 @@ class AgentBridge:
                 title="Analyze challenge evidence",
                 description="Use the loaded skills, challenge text, and current evidence to derive the most plausible result.",
                 kind=TaskNodeKind.SUBAGENT,
-                metadata={"agent_role": "ctf_specialist", "task_mode": "ctf_solve"},
+                metadata={"task_mode": "ctf_solve"},
             )
+            solve.owner_profile_name = "hackey-ctf"
             connect(upstream_node, solve)
             upstream.append(solve)
         elif "web_analysis" in labels:
-            domain = scope.allowed_domains[0] if scope.allowed_domains else self._guess_domain(task)
-            url = self._resolve_web_url(task, domain or "")
+            domain = scope.allowed_domains[0] if scope.allowed_domains else self._test_guess_domain(task)
+            url = self._test_resolve_web_url(task, domain or "")
             fetch = add_node(
                 title="Fetch target page",
                 description="Fetch the approved target page and turn the response into evidence.",
@@ -539,8 +590,8 @@ class AgentBridge:
                 title="Interpret collected web evidence",
                 description="Inspect the fetched evidence and summarize the most relevant observations.",
                 kind=TaskNodeKind.SUBAGENT,
-                metadata={"agent_role": "deepworker"},
             )
+            analyze.owner_profile_name = "hephaestus-deepworker"
             connect(fetch, analyze)
             upstream.append(analyze)
         else:
@@ -559,12 +610,12 @@ class AgentBridge:
                 title="Interpret repository evidence",
                 description="Summarize the codebase structure, notable modules, and likely focus areas.",
                 kind=TaskNodeKind.SUBAGENT,
-                metadata={"agent_role": "deepworker"},
             )
+            analyze.owner_profile_name = "hephaestus-deepworker"
             connect(search, analyze)
             upstream.append(analyze)
 
-        kb_arguments = self._knowledge_lookup_arguments(task)
+        kb_arguments = self._test_knowledge_lookup_arguments(task)
         if kb_arguments:
             kb = add_node(
                 title="Query vulnerability knowledge base",
@@ -597,13 +648,13 @@ class AgentBridge:
         connect(report, export)
         return TaskGraph(run_id=run_id, nodes=nodes, edges=edges)
 
-    def _fake_planner_message(self, intent: IntentProfile, graph: TaskGraph, *, clarify_message: str | None) -> str:
+    def _test_planner_message(self, intent: IntentProfile, graph: TaskGraph, *, clarify_message: str | None) -> str:
         if clarify_message:
             return f"我先确认一下目标边界。{clarify_message}"
         node_titles = "；".join(node.title for node in graph.nodes[:4])
         return f"我理解这次目标是：{intent.objective}。我先按这条路径推进：{node_titles}。"
 
-    def _infer_intent_profile(self, task: str, scope: Scope) -> IntentProfile:
+    def _test_intent_profile(self, task: str, scope: Scope) -> IntentProfile:
         lower = task.lower()
         labels: list[str] = []
         report_kind_hint = "analysis_note"
@@ -630,11 +681,11 @@ class AgentBridge:
             confidence=0.74,
         )
 
-    def _needs_clarification(self, task: str, scope: Scope, intent: IntentProfile) -> bool:
+    def _test_needs_clarification(self, task: str, scope: Scope, intent: IntentProfile) -> bool:
         labels = set(intent.labels)
         if labels == {"general"} and not scope.allowed_domains and not scope.repo_paths and not scope.artifacts:
             return True
-        if "web_analysis" in labels and not scope.allowed_domains and not self._guess_domain(task):
+        if "web_analysis" in labels and not scope.allowed_domains and not self._test_guess_domain(task):
             return True
         if "code_review" in labels and not scope.repo_paths:
             return False
@@ -659,7 +710,7 @@ class AgentBridge:
             or node.description
         )
 
-    def _guess_domain(self, task: str) -> str | None:
+    def _test_guess_domain(self, task: str) -> str | None:
         match = re.search(r"https?://([^\s/]+)", task)
         if match:
             return match.group(1)
@@ -668,7 +719,7 @@ class AgentBridge:
             return domain_match.group(0)
         return None
 
-    def _resolve_web_url(self, task: str, domain: str) -> str:
+    def _test_resolve_web_url(self, task: str, domain: str) -> str:
         match = re.search(r"https?://[^\s]+", task)
         if match:
             return match.group(0)
@@ -678,7 +729,7 @@ class AgentBridge:
             return f"https://{domain}"
         return "https://example.invalid"
 
-    def _knowledge_lookup_arguments(self, task: str) -> dict[str, Any] | None:
+    def _test_knowledge_lookup_arguments(self, task: str) -> dict[str, Any] | None:
         cve_match = re.search(r"\bCVE-\d{4}-\d+\b", task, re.IGNORECASE)
         if cve_match:
             return {"cve_id": cve_match.group(0).upper(), "limit": 5}
@@ -689,14 +740,14 @@ class AgentBridge:
             return {"query": task[:160], "limit": 5}
         return None
 
-    def _ctf_specialist_skill(self, task: str) -> str | None:
+    def _test_ctf_specialist_skill(self, task: str) -> str | None:
         lower = task.lower()
         tokens = ["crypto", "rail", "stego", "mobile", "decode", "cipher", "base64", "rot", "xor", "morse"]
         if any(token in lower for token in tokens) or any(token in task for token in ["栅栏", "密文", "编码", "解码", "图片", "音频", "安卓", "苹果", "摩斯"]):
             return "competition-crypto-mobile"
         return None
 
-    def _fake_batch_selection(
+    def _test_batch_selection(
         self,
         ready_nodes: list[TaskNode],
         *,
@@ -729,7 +780,7 @@ class AgentBridge:
         tool_name = node.metadata.get("tool_name")
         return tool_name == "shell_exec" or bool(risk_tags & {"filesystem_write", "network", "export_sensitive", "shell_exec"})
 
-    def _fake_memory_curation(
+    def _test_memory_curation(
         self,
         *,
         task: str,
@@ -789,7 +840,7 @@ class AgentBridge:
             "wiki_entries": wiki_entries,
         }
 
-    def _fake_report(self, dossier: ReportDossier) -> ReportDraft:
+    def _test_report(self, dossier: ReportDossier) -> ReportDraft:
         evidence = dossier.evidence
         evidence_ids = [item["evidence_id"] for item in evidence if item.get("evidence_id")]
         labels = set((dossier.intent_profile.labels if dossier.intent_profile else []) or [])
@@ -913,7 +964,7 @@ class AgentBridge:
                     break
         return [ref for ref in refs if ref][:3]
 
-    def _fake_direct_answer(
+    def _test_direct_answer(
         self,
         *,
         user_question: str,
@@ -926,6 +977,11 @@ class AgentBridge:
         awaiting_reason: str | None,
         budget: dict[str, Any],
     ) -> str:
+        lower_question = user_question.lower()
+        if "什么是ctf" in lower_question or "解释一下什么是ctf" in lower_question:
+            return "CTF 是 Capture The Flag，一类以解题、取证、逆向、Web、密码学等方向为主的安全竞赛。通常会给出题面、附件或目标环境，参赛者需要在受控范围内分析并拿到 flag。"
+        if any(marker in lower_question for marker in {"解释", "介绍", "说明", "what is"}):
+            return f"这是一个答疑消息，不会改动当前任务图。就这条问题本身看，我理解你是在请求解释：{user_question.strip()}。"
         lines = [f"当前 session 状态是 {session_status}。"]
         if run_status:
             lines.append(f"当前 run 状态是 {run_status}。")
@@ -958,8 +1014,8 @@ class AgentBridge:
             lines.append("需要审批是因为这个动作被权限层判定为高风险，必须先对精确动作摘要做人工确认。")
         return "\n".join(lines)
 
-    def _fake_response(self, task: str) -> str:
-        candidate = self._fake_ctf_response(task)
+    def _test_response(self, task: str) -> str:
+        candidate = self._test_ctf_response(task)
         if candidate:
             return candidate
         task = task.strip()
@@ -967,7 +1023,7 @@ class AgentBridge:
             task = task[:180] + "..."
         return f"离线模式摘要：{task}"
 
-    def _fake_ctf_response(self, task: str) -> str | None:
+    def _test_ctf_response(self, task: str) -> str | None:
         token = self._extract_ctf_blob(task)
         lower = task.lower()
         if not token:

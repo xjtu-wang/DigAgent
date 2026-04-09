@@ -55,7 +55,6 @@ async def test_user_input_replan_supersedes_old_descendants(manager, repo_root):
         session_id=session.session_id,
         profile_name="sisyphus-default",
         task="帮我分析一下",
-        task_type=session.task_type,
         scope=Scope(repo_paths=[str(repo_root)]),
         budget=manager.profiles["sisyphus-default"].runtime_budget,
     )
@@ -216,6 +215,7 @@ async def test_profile_driven_agents_are_used(manager, repo_root):
                         kind=TaskNodeKind.SUBAGENT,
                         description="solve the ctf challenge",
                         summary="solve the ctf challenge",
+                        owner_profile_name="hackey-ctf",
                     ),
                     TaskNode(
                         node_id="aggregate",
@@ -326,16 +326,7 @@ async def test_profile_driven_agents_are_used(manager, repo_root):
     assert calls["curator"] == ["memory-curator"]
 
 
-def test_subagent_routing_uses_intent_labels(manager):
-    run = manager.storage.create_run(
-        session_id=manager.create_session(title="route", profile_name="sisyphus-default").session_id,
-        profile_name="sisyphus-default",
-        task="请分析这个仓库",
-        task_type="general",
-        scope=Scope(),
-        budget=manager.profiles["sisyphus-default"].runtime_budget,
-    )
-    run.intent_profile = IntentProfile(objective="repo", labels=["code_review"], report_kind_hint="code_review_report", confidence=0.8)
+def test_subagent_routing_requires_explicit_owner(manager):
     node = TaskNode(
         node_id="sub",
         title="Inspect repo",
@@ -343,4 +334,8 @@ def test_subagent_routing_uses_intent_labels(manager):
         description="inspect repo",
         summary="inspect repo",
     )
-    assert manager._subagent_profile_name(run, node) == "hephaestus-deepworker"
+    with pytest.raises(ValueError):
+        manager._subagent_profile_name(node)
+
+    node.owner_profile_name = "hephaestus-deepworker"
+    assert manager._subagent_profile_name(node) == "hephaestus-deepworker"

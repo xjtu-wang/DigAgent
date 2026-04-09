@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from digagent.models import TaskGraph
-from digagent.models import Scope, TaskNode, TaskNodeKind, TaskNodeStatus, UserTurnDisposition
+from digagent.models import IntentProfile, PlanningBundle, Scope, TaskGraph, TaskNode, TaskNodeKind, TaskNodeStatus, UserTurnDisposition
 from digagent.tools import ToolExecutionResult
 
 from tests.helpers import wait_for_run
@@ -70,6 +69,22 @@ async def test_continue_run_from_awaiting_user_input(manager):
 
 
 @pytest.mark.asyncio
+async def test_question_during_clarify_stays_direct_answer(manager):
+    session = manager.create_session(title="clarify-qa", profile_name="sisyphus-default")
+    _, turn = await manager.handle_message(session_id=session.session_id, content="hello world")
+    paused = await wait_for_run(manager, turn.run_id, statuses={"awaiting_user_input", "failed"})
+    assert paused.status.value == "awaiting_user_input"
+
+    _, answer = await manager.handle_message(session_id=session.session_id, content="解释一下什么是CTF")
+    assert answer.disposition == UserTurnDisposition.DIRECT_ANSWER
+    assert "Capture The Flag" in (answer.assistant_message or "")
+
+    still_paused = manager.storage.find_run(turn.run_id)
+    assert still_paused.status.value == "awaiting_user_input"
+    assert all(node.owner_profile_name != "hackey-ctf" for node in still_paused.task_graph.nodes if node.kind == TaskNodeKind.SUBAGENT)
+
+
+@pytest.mark.asyncio
 async def test_multiple_commands_single_message_stays_single_run(manager, repo_root):
     session = manager.create_session(
         title="multi-intent",
@@ -91,7 +106,7 @@ async def test_multiple_commands_single_message_stays_single_run(manager, repo_r
 @pytest.mark.asyncio
 async def test_planner_entrypoint_is_used(manager):
     called: dict[str, TaskGraph | bool] = {"value": False}
-    original = manager.agent.build_fallback_task_graph
+    original = manager.agent.build_test_planning_bundle
 
     async def fake_plan_task_graph(**kwargs):
         called["value"] = True
@@ -129,20 +144,30 @@ async def test_waiting_user_input_uses_metadata_question(manager):
     question = "你好！请问今天有什么具体的任务需要我帮您处理吗？"
 
     async def fake_plan_task_graph(**kwargs):
-        return TaskGraph(
-            run_id=kwargs["run_id"],
-            nodes=[
-                TaskNode(
-                    node_id="clarify_intent",
-                    title="澄清任务需求",
-                    kind=TaskNodeKind.INPUT,
-                    status=TaskNodeStatus.WAITING_USER_INPUT,
-                    description="用户发送了问候语，需要明确具体的任务指令以开始工作。",
-                    summary="等待用户提供具体任务描述",
-                    metadata={"question": question},
-                )
-            ],
-            edges=[],
+        return PlanningBundle(
+            intent_profile=IntentProfile(
+                objective="澄清任务需求",
+                labels=["general"],
+                report_kind_hint="analysis_note",
+                confidence=0.9,
+            ),
+            planner_message="我先确认一下你今天要做的具体任务。",
+            clarify_message=question,
+            task_graph=TaskGraph(
+                run_id=kwargs["run_id"],
+                nodes=[
+                    TaskNode(
+                        node_id="clarify_intent",
+                        title="澄清任务需求",
+                        kind=TaskNodeKind.INPUT,
+                        status=TaskNodeStatus.WAITING_USER_INPUT,
+                        description="用户发送了问候语，需要明确具体的任务指令以开始工作。",
+                        summary="等待用户提供具体任务描述",
+                        metadata={"question": question},
+                    )
+                ],
+                edges=[],
+            ),
         )
 
     manager.agent.plan_task_graph = fake_plan_task_graph

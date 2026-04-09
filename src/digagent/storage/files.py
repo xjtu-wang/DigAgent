@@ -143,7 +143,7 @@ class FileStorage:
     def cve_index_path(self, name: str) -> Path:
         return self.cve_index_dir() / f"{name}.json"
 
-    def create_session(self, title: str, root_agent_profile: str, task_type: str, scope: Scope) -> SessionRecord:
+    def create_session(self, title: str, root_agent_profile: str, scope: Scope) -> SessionRecord:
         now = utc_now()
         session = SessionRecord(
             session_id=new_id("sess"),
@@ -151,7 +151,6 @@ class FileStorage:
             created_at=now,
             updated_at=now,
             root_agent_profile=root_agent_profile,
-            task_type=task_type,
             scope=scope,
         )
         self.save_session(session)
@@ -208,7 +207,6 @@ class FileStorage:
         session_id: str,
         profile_name: str,
         task: str,
-        task_type: str,
         scope: Scope,
         budget,
         trigger_message_id: str | None = None,
@@ -220,7 +218,6 @@ class FileStorage:
             root_agent_id=profile_name,
             profile_name=profile_name,
             status="created",
-            task_type=task_type,
             user_task=task,
             scope=scope,
             budget=budget,

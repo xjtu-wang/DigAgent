@@ -28,6 +28,14 @@ class UserTurnDisposition(StrEnum):
     REJECT = "reject"
 
 
+class MessageRoute(StrEnum):
+    DIRECT_ANSWER = "direct_answer"
+    CLARIFICATION_INPUT = "clarification_input"
+    APPROVAL_RESPONSE = "approval_response"
+    CANCEL = "cancel"
+    NEW_RUN_REQUEST = "new_run_request"
+
+
 class RunStatus(StrEnum):
     CREATED = "created"
     PLANNING = "planning"
@@ -40,13 +48,6 @@ class RunStatus(StrEnum):
     FAILED = "failed"
     CANCELLED = "cancelled"
     TIMED_OUT = "timed_out"
-
-
-class TaskType(StrEnum):
-    CTF = "ctf"
-    CODE_REVIEW = "code_review"
-    WEB_ANALYSIS = "web_analysis"
-    GENERAL = "general"
 
 
 class TaskNodeKind(StrEnum):
@@ -266,6 +267,11 @@ class ExecutionBatchDecision(DigAgentModel):
     rationale: str | None = None
 
 
+class MessageRoutingDecision(DigAgentModel):
+    route: MessageRoute
+    rationale: str | None = None
+
+
 class ActionTargets(DigAgentModel):
     paths: list[str] = Field(default_factory=list)
     domains: list[str] = Field(default_factory=list)
@@ -363,7 +369,6 @@ class SessionRecord(DigAgentModel):
     updated_at: str
     status: SessionStatus = SessionStatus.IDLE
     root_agent_profile: str
-    task_type: str = TaskType.GENERAL.value
     intent_profile: IntentProfile | None = None
     scope: Scope = Field(default_factory=Scope)
     run_ids: list[str] = Field(default_factory=list)
@@ -380,21 +385,6 @@ class SessionRecord(DigAgentModel):
     latest_report_id: str | None = None
     last_report_id: str | None = None
     archived_at: str | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _upgrade_legacy_status(cls, value: Any) -> Any:
-        if not isinstance(value, dict):
-            return value
-        payload = dict(value)
-        legacy = payload.get("status")
-        if legacy == "active":
-            payload["status"] = "active_run" if payload.get("active_run_id") else "idle"
-        elif legacy == "completed":
-            payload["status"] = "idle"
-        if not payload.get("latest_report_id") and payload.get("last_report_id"):
-            payload["latest_report_id"] = payload["last_report_id"]
-        return payload
 
 
 class SessionSummary(DigAgentModel):
@@ -615,68 +605,6 @@ class CveSyncState(DigAgentModel):
     running: bool = False
 
 
-def _legacy_status_to_task_status(item_status: str, run_status: str) -> str:
-    if item_status == "completed":
-        return TaskNodeStatus.COMPLETED.value
-    if item_status == "running":
-        return TaskNodeStatus.RUNNING.value
-    if item_status == "failed":
-        return TaskNodeStatus.FAILED.value
-    if item_status == "blocked":
-        if run_status == RunStatus.AWAITING_APPROVAL.value:
-            return TaskNodeStatus.WAITING_APPROVAL.value
-        if run_status == RunStatus.AWAITING_USER_INPUT.value:
-            return TaskNodeStatus.WAITING_USER_INPUT.value
-        return TaskNodeStatus.BLOCKED.value
-    return TaskNodeStatus.PENDING.value
-
-
-def _upgrade_legacy_task_graph(payload: dict[str, Any]) -> dict[str, Any] | None:
-    legacy_items = payload.get("plan_items") or []
-    if not legacy_items:
-        return None
-    nodes: list[dict[str, Any]] = []
-    edges: list[dict[str, Any]] = []
-    run_status = str(payload.get("status") or "")
-    for index, item in enumerate(legacy_items):
-        metadata = item.get("metadata") or {}
-        action_request = metadata.get("action_request")
-        action_id = action_request.get("action_id") if isinstance(action_request, dict) else None
-        node = {
-            "node_id": item.get("item_id") or f"legacy-node-{index + 1}",
-            "title": item.get("title") or f"Step {index + 1}",
-            "kind": item.get("kind") or TaskNodeKind.AGGREGATE.value,
-            "status": _legacy_status_to_task_status(item.get("status") or "pending", run_status),
-            "description": item.get("description") or item.get("title") or f"Step {index + 1}",
-            "summary": metadata.get("summary"),
-            "block_reason": metadata.get("permission_reason") or payload.get("awaiting_reason"),
-            "action_id": action_id,
-            "action_request": action_request,
-            "approval_id": metadata.get("approval_id"),
-            "evidence_refs": list(dict.fromkeys(metadata.get("evidence_ids", []))),
-            "artifact_refs": list(dict.fromkeys(metadata.get("artifact_ids", []))),
-            "retry_count": metadata.get("retry_count", 0),
-            "max_retries": metadata.get("max_retries", 1),
-            "metadata": metadata,
-        }
-        nodes.append(node)
-        if index + 1 < len(legacy_items):
-            edges.append(
-                {
-                    "source": node["node_id"],
-                    "target": legacy_items[index + 1].get("item_id") or f"legacy-node-{index + 2}",
-                }
-            )
-    graph = {
-        "run_id": payload.get("run_id", "legacy-run"),
-        "graph_version": 1,
-        "nodes": nodes,
-        "edges": edges,
-        "applied_ops": [],
-    }
-    return _normalize_graph_payload(graph)
-
-
 class RunRecord(DigAgentModel):
     schema_version: str = "1.0"
     run_id: str
@@ -684,7 +612,6 @@ class RunRecord(DigAgentModel):
     root_agent_id: str = "sisyphus"
     profile_name: str
     status: RunStatus
-    task_type: TaskType
     intent_profile: IntentProfile | None = None
     user_task: str
     scope: Scope = Field(default_factory=Scope)
@@ -710,22 +637,6 @@ class RunRecord(DigAgentModel):
     updated_at: str
     started_at: str | None = None
     finished_at: str | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _upgrade_legacy_fields(cls, value: Any) -> Any:
-        if not isinstance(value, dict):
-            return value
-        payload = dict(value)
-        if not payload.get("task_graph"):
-            legacy_graph = _upgrade_legacy_task_graph(payload)
-            if legacy_graph:
-                payload["task_graph"] = legacy_graph
-        payload.pop("plan_items", None)
-        payload.pop("current_node", None)
-        payload.pop("graph_nodes", None)
-        payload.pop("current_step_index", None)
-        return payload
 
 
 class RunEvent(DigAgentModel):

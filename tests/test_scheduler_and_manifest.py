@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from digagent.models import Scope, TaskEdge, TaskGraph, TaskNode, TaskNodeKind
+from digagent.models import IntentProfile, PlanningBundle, Scope, TaskEdge, TaskGraph, TaskNode, TaskNodeKind
 from digagent.tools import ToolExecutionResult
 
 from tests.helpers import wait_for_run
@@ -87,15 +87,24 @@ async def test_non_exclusive_ready_nodes_run_in_parallel(manager, repo_root):
             summary="Export PDF.",
             metadata={"format": "pdf"},
         )
-        return TaskGraph(
-            run_id=kwargs["run_id"],
-            nodes=[search, kb, aggregate, report, export],
-            edges=[
-                TaskEdge(source="node_search", target="node_aggregate"),
-                TaskEdge(source="node_kb", target="node_aggregate"),
-                TaskEdge(source="node_aggregate", target="node_report"),
-                TaskEdge(source="node_report", target="node_export"),
-            ],
+        return PlanningBundle(
+            intent_profile=IntentProfile(
+                objective="并行收集仓库线索和漏洞知识库线索",
+                labels=["code_review"],
+                report_kind_hint="analysis_note",
+                confidence=0.9,
+            ),
+            planner_message="我会先并行收集两路证据，再汇总写报告。",
+            task_graph=TaskGraph(
+                run_id=kwargs["run_id"],
+                nodes=[search, kb, aggregate, report, export],
+                edges=[
+                    TaskEdge(source="node_search", target="node_aggregate"),
+                    TaskEdge(source="node_kb", target="node_aggregate"),
+                    TaskEdge(source="node_aggregate", target="node_report"),
+                    TaskEdge(source="node_report", target="node_export"),
+                ],
+            ),
         )
 
     manager.agent.plan_task_graph = fake_plan_task_graph

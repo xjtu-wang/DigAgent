@@ -17,7 +17,6 @@ from digagent.runtime import RunManager
 class CreateSessionRequest(BaseModel):
     title: str
     profile: str = "sisyphus-default"
-    task_type: str = "general"
     scope: Scope = Field(default_factory=Scope)
 
 
@@ -75,7 +74,6 @@ def create_app(manager: RunManager | None = None) -> FastAPI:
         session = manager.create_session(
             title=body.title,
             profile_name=body.profile,
-            task_type=body.task_type,
             scope=body.scope,
         )
         return session.model_dump(mode="json")
@@ -133,7 +131,6 @@ def create_app(manager: RunManager | None = None) -> FastAPI:
             session_id = manager.create_session(
                 title=body.title or body.task[:60],
                 profile_name=body.profile,
-                task_type="general",
                 scope=body.scope,
             ).session_id
         session, turn = await manager.handle_message(

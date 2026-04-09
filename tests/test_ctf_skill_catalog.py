@@ -28,8 +28,8 @@ def test_vendored_ctf_skills_are_loaded_from_data_dir(manager):
     assert Path(orchestrator.agent_config_path).is_relative_to(skills_root)
 
 
-def test_ctf_fallback_graph_uses_vendored_skill_chain(manager):
-    graph = manager.agent.build_fallback_task_graph(
+def test_ctf_test_graph_uses_vendored_skill_chain(manager):
+    graph = manager.agent.build_test_task_graph(
         run_id="run_ctf",
         task="一道密码学 CTF 题：一只小羊翻过了 2 个栅栏 `fa{fe13f590lg6d46d0d0}`",
         scope=Scope(),
