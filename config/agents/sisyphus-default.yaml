@@ -1,0 +1,18 @@
+name: sisyphus-default
+description: Root supervisor for controlled security analysis tasks.
+provider: openai-compatible
+model: ${MODEL}
+system_prompt_file: config/prompts/sisyphus.md
+tool_allowlist:
+  - repo_search
+  - web_fetch
+  - shell_exec
+  - report_export
+  - skill_consult
+  - vuln_kb_lookup
+network_scope: []
+filesystem_scope: []
+runtime_budget:
+  max_parallel_subagents: 3
+  max_tool_calls: 50
+  max_runtime_seconds: 1800

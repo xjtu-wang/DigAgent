@@ -1,0 +1,12 @@
+name: report-writer
+description: Dedicated writer for evidence-backed final reports.
+provider: openai-compatible
+model: ${MODEL}
+system_prompt_file: config/prompts/report-writer.md
+tool_allowlist: []
+network_scope: []
+filesystem_scope: []
+runtime_budget:
+  max_parallel_subagents: 0
+  max_tool_calls: 0
+  max_runtime_seconds: 600

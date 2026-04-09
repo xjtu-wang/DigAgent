@@ -1,0 +1,26 @@
+{
+  "evidence_id": "ev_dacaa9f96a78",
+  "session_id": "sess_b6c3744f5c0f",
+  "run_id": "run_95cc36fecf56",
+  "type": "user_input",
+  "title": "User clarification",
+  "summary": "..-./.-../.-/--./----.--/-../...--/..-./-.-./-.../..-./.----/--.../..-./----./...--/----./----./...../-----/....-/-----.-\n做一下这道题",
+  "source": {
+    "tool_name": "user_input",
+    "agent_id": "user"
+  },
+  "artifact_refs": [
+    "art_3ea9154e8aa2"
+  ],
+  "hash": "sha256:713dd4b1bfc46698eaf9458817e1fa09548fcd885b0dee5389ef17387b4273f2",
+  "content_ref": "artifact://art_3ea9154e8aa2",
+  "structured_facts": [
+    {
+      "key": "clarification",
+      "value": "..-./.-../.-/--./----.--/-../...--/..-./-.-./-.../..-./.----/--.../..-./----./...--/----./----./...../-----/....-/-----.-\n做一下这道题"
+    }
+  ],
+  "confidence": 0.8,
+  "sensitivity": "low",
+  "created_at": "2026-04-08T16:26:30Z"
+}

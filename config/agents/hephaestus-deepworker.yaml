@@ -1,0 +1,16 @@
+name: hephaestus-deepworker
+description: Focused worker for repo and web evidence analysis.
+provider: openai-compatible
+model: ${MODEL}
+system_prompt_file: config/prompts/hephaestus.md
+tool_allowlist:
+  - repo_search
+  - web_fetch
+  - skill_consult
+  - vuln_kb_lookup
+network_scope: []
+filesystem_scope: []
+runtime_budget:
+  max_parallel_subagents: 1
+  max_tool_calls: 20
+  max_runtime_seconds: 900

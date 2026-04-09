@@ -1,0 +1,30 @@
+{
+  "evidence_id": "ev_dd5f14b3f596",
+  "session_id": "sess_b6c3744f5c0f",
+  "run_id": "run_95cc36fecf56",
+  "type": "analysis_summary",
+  "title": "Aggregated Analysis",
+  "summary": "该摩斯密码经过逐字符解码，最终结论如下：\n\n**最终答案：** `FLAG{D3FCBF17F9399504}`\n\n**推导证据：**\n1.  **前缀识别**：前四个字符 `..-.` (F)、`.-..` (L)、`.-` (A)、`--.` (G) 组成了常见的 CTF 题目标识符 `FLAG`。\n2.  **分隔符判定**：紧随其后的 `----.--` 和结尾的 `-----.-` 虽然不是标准摩斯密码符号，但在 CTF 竞赛中常被用作大括号 `{` 和 `}` 的自定义映射。\n3.  **内容解码**：中间部分的十六进制字符序列解码如下：\n    *   `-..` → **D**\n    *   `...--` → **3**\n    *   `..-.` → **F**\n    *   `-.-.` → **C**\n    *   `-...` → **B**\n    *   `..-.` → **F**\n    *   `.----` → **1**\n    *   `--...` → **7**\n    *   `..-.` → **F**\n    *   `----.` → **9**\n    *   `...--` → **3**\n    *   `----.` → **9**\n    *   `----.` → **9**\n    *   `.....` → **5**\n    *   `-----` → **0**\n    *   `....-` → **4**\n\n该结论基于摩斯密码标准映射及 CTF 题目常见格式，具有极高置信度。",
+  "source": {
+    "tool_name": "aggregate",
+    "agent_id": "sisyphus"
+  },
+  "artifact_refs": [
+    "art_8b3dc33c23c2"
+  ],
+  "hash": "sha256:5a940a9f1ba9aaa06f2abc197ce0c41096e3f2b7bae522ae5385896e139ebf74",
+  "content_ref": "artifact://art_8b3dc33c23c2",
+  "structured_facts": [
+    {
+      "key": "intent_labels",
+      "value": "ctf,crypto,morse_code"
+    },
+    {
+      "key": "candidate_flag",
+      "value": "FLAG{D3FCBF17F9399504}"
+    }
+  ],
+  "confidence": 0.8,
+  "sensitivity": "low",
+  "created_at": "2026-04-08T16:28:02Z"
+}

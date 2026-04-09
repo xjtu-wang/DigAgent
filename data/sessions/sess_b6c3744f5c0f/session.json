@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0",
+  "session_id": "sess_b6c3744f5c0f",
+  "title": "你好",
+  "created_at": "2026-04-08T16:24:35Z",
+  "updated_at": "2026-04-08T16:29:17Z",
+  "status": "active_run",
+  "root_agent_profile": "sisyphus-default",
+  "task_type": "greeting",
+  "intent_profile": {
+    "objective": "响应用户问候并引导其提供具体的任务指令",
+    "labels": [
+      "greeting",
+      "clarification"
+    ],
+    "report_kind_hint": "text",
+    "confidence": 1.0
+  },
+  "scope": {
+    "repo_paths": [],
+    "allowed_domains": [],
+    "artifacts": []
+  },
+  "run_ids": [
+    "run_95cc36fecf56"
+  ],
+  "active_run_id": "run_95cc36fecf56",
+  "pending_approval_ids": [],
+  "pending_user_question": null,
+  "conversation_summary": null,
+  "last_intent_type": "continue_run",
+  "last_user_message_id": "msg_a30781c866d4",
+  "last_agent_message_id": "msg_8ad473e51813",
+  "memory_refs": [],
+  "evidence_refs": [
+    "ev_dd5f14b3f596"
+  ],
+  "report_refs": [
+    "rep_86eee40b522f"
+  ],
+  "latest_report_id": "rep_86eee40b522f",
+  "last_report_id": "rep_86eee40b522f",
+  "archived_at": null
+}

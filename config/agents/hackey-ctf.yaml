@@ -1,0 +1,15 @@
+name: hackey-ctf
+description: CTF-oriented profile for skill-guided challenge analysis.
+provider: openai-compatible
+model: ${MODEL}
+system_prompt_file: config/prompts/hackey.md
+tool_allowlist:
+  - skill_consult
+  - shell_exec
+  - vuln_kb_lookup
+network_scope: []
+filesystem_scope: []
+runtime_budget:
+  max_parallel_subagents: 1
+  max_tool_calls: 20
+  max_runtime_seconds: 900

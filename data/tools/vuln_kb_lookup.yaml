@@ -1,0 +1,8 @@
+name: vuln_kb_lookup
+description: Query the local NVD-derived vulnerability knowledge base by keyword, CVE, CWE or product.
+action_type: tool
+risk_tags: []
+default_targets:
+  paths: []
+  domains: []
+executor_adapter: vuln_kb_lookup

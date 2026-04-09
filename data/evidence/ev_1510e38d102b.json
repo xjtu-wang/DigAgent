@@ -1,0 +1,49 @@
+{
+  "evidence_id": "ev_1510e38d102b",
+  "session_id": "sess_63693e4e4db1",
+  "run_id": "run_c9c111ec4acf",
+  "type": "user_input",
+  "title": "Skill Loaded: ctf-sandbox-orchestrator",
+  "summary": "Default entrypoint and master ctf-sandbox-orchestrator workflow for CTF, exploit, reverse engineering, DFIR, pwnable, crypto, stego, mobile, AI-agent, cloud, container, Active Directory, Windows-host, and identity challenges. Use first when the user presents challenge infrastructure, binaries, prompts, hosts, or identities that should be treated as sandbox-internal by default and Codex needs to choose, route, and load the right downstream analysis path with concise evidence.",
+  "source": {
+    "tool_name": "skill_consult",
+    "path": "/mnt/d/CodeLab/DigAgent/data/skills/ctf-sandbox-orchestrator/SKILL.md",
+    "references": [
+      "references/agent-cloud.md",
+      "references/crypto-mobile.md",
+      "references/identity-windows.md",
+      "references/reporting.md",
+      "references/reverse-native.md",
+      "references/router-matrix.md",
+      "references/web-api.md"
+    ],
+    "agent_config_path": "/mnt/d/CodeLab/DigAgent/data/skills/ctf-sandbox-orchestrator/agents/openai.yaml",
+    "agent_id": "sisyphus"
+  },
+  "artifact_refs": [
+    "art_1a0d88cbec39"
+  ],
+  "hash": "sha256:02f9f8b5258f4e6f4576176849cab6f47597eaddeeffbe8dedf904a98517e3e5",
+  "content_ref": "artifact://art_1a0d88cbec39",
+  "structured_facts": [
+    {
+      "key": "skill_name",
+      "value": "ctf-sandbox-orchestrator"
+    },
+    {
+      "key": "reference_count",
+      "value": 7
+    },
+    {
+      "key": "allow_implicit_invocation",
+      "value": true
+    },
+    {
+      "key": "downstream_only",
+      "value": false
+    }
+  ],
+  "confidence": 0.8,
+  "sensitivity": "low",
+  "created_at": "2026-04-09T01:12:57Z"
+}
