@@ -22,6 +22,7 @@ export const DEFAULT_APP_SETTINGS = Object.freeze({
     focusActiveOnOpen: true,
     focusActiveOnUpdate: true,
     showEventMetadata: true,
+    expandDebugDataByDefault: false,
   },
 });
 
@@ -61,6 +62,10 @@ function migrateWorkflowPreferences(value) {
   };
 }
 
+export function normalizeWorkflowPreferences(value) {
+  return mergeSection(DEFAULT_APP_SETTINGS.workflowPreferences, value);
+}
+
 export function normalizeAppSettings(value) {
   const defaults = cloneDefaults();
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -75,7 +80,7 @@ export function normalizeAppSettings(value) {
     runtimeDefaults: mergeSection(defaults.runtimeDefaults, value.runtimeDefaults),
     chatPreferences: mergeSection(defaults.chatPreferences, value.chatPreferences),
     layoutPreferences,
-    workflowPreferences: mergeSection(defaults.workflowPreferences, migrateWorkflowPreferences(value)),
+    workflowPreferences: normalizeWorkflowPreferences(migrateWorkflowPreferences(value) || value.workflowPreferences),
   };
 }
 
@@ -128,4 +133,18 @@ export function createRuntimeDraft(settings) {
     domain: normalized.runtimeDefaults.domain,
     autoApprove: normalized.runtimeDefaults.autoApprove,
   };
+}
+
+export function loadWorkflowPreferences(storage = globalThis?.localStorage, fallback = null) {
+  const normalized = storage ? loadAppSettings(storage) : normalizeAppSettings({ workflowPreferences: fallback });
+  return normalizeWorkflowPreferences(normalized.workflowPreferences || fallback);
+}
+
+export function updateWorkflowPreferences(patch, storage = globalThis?.localStorage) {
+  const current = storage ? loadAppSettings(storage) : normalizeAppSettings({});
+  const next = {
+    ...current,
+    workflowPreferences: normalizeWorkflowPreferences({ ...current.workflowPreferences, ...patch }),
+  };
+  return saveAppSettings(next, storage).workflowPreferences;
 }

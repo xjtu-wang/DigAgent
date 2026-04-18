@@ -21,6 +21,19 @@ class SessionStatus(StrEnum):
     ARCHIVED = "archived"
 
 
+class SessionTitleStatus(StrEnum):
+    PENDING = "pending"
+    GENERATING = "generating"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class SessionTitleSource(StrEnum):
+    MANUAL = "manual"
+    SEED = "seed"
+    MODEL = "model"
+
+
 class UserTurnDisposition(StrEnum):
     DIRECT_ANSWER = "direct_answer"
     CREATE_TURN = "create_turn"
@@ -527,6 +540,8 @@ class SessionRecord(DigAgentModel):
     schema_version: str = "2.0"
     session_id: str
     title: str
+    title_status: SessionTitleStatus = SessionTitleStatus.READY
+    title_source: SessionTitleSource = SessionTitleSource.MANUAL
     created_at: str
     updated_at: str
     status: SessionStatus = SessionStatus.IDLE
@@ -553,6 +568,8 @@ class SessionRecord(DigAgentModel):
 class SessionSummary(DigAgentModel):
     session_id: str
     title: str
+    title_status: SessionTitleStatus = SessionTitleStatus.READY
+    title_source: SessionTitleSource = SessionTitleSource.MANUAL
     status: SessionStatus
     updated_at: str
     active_turn_id: str | None = None

@@ -1,13 +1,26 @@
 import React from "react";
 import { Menu, MessageSquarePlus, Search, Settings2, Trash2, X } from "lucide-react";
 
+function ClampedText({ className = "", lines = 1, text }) {
+  const value = text || "新聊天";
+  return (
+    <div
+      className={`overflow-hidden text-ellipsis [overflow-wrap:anywhere] ${className}`}
+      style={{ WebkitBoxOrient: "vertical", WebkitLineClamp: lines, display: "-webkit-box" }}
+      title={value}
+    >
+      {value}
+    </div>
+  );
+}
+
 function SessionListItem({ item, active, onDelete, onSelect }) {
   const deleteDisabled = Boolean(item.active_turn_id);
 
   return (
     <div className={`group relative flex items-center rounded-lg transition ${active ? "bg-slate-200/70" : "hover:bg-slate-200/50"}`}>
       <button type="button" onClick={() => onSelect(item.session_id)} className="min-w-0 flex-1 px-3 py-2 text-left">
-        <div className="truncate text-sm text-slate-800">{item.title || "新聊天"}</div>
+        <ClampedText className="text-sm text-slate-800" lines={2} text={item.title} />
       </button>
       <button
         type="button"

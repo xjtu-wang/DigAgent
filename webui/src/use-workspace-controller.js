@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { groupSessionsByDate, scopePayload } from "./chat-utils.js";
 import { buildInspectorActivityEvents, buildInspectorGraph } from "./inspector-store.js";
 import { emptyOverrides, normalizePermissionOverrides } from "./permissions-store.js";
+import { buildPrimaryTimeline } from "./semantic-timeline.js";
 import { createRuntimeDraft } from "./settings-store.js";
-import { filterActivityEvents, filterPrimaryTimeline, mergeHistory } from "./timeline-utils.js";
+import { filterActivityEvents } from "./timeline-utils.js";
 import { normalizeTurnEvent, normalizeTurns, TERMINAL_TURN_STATUSES } from "./turn-utils.js";
 
 const SESSION_REFRESH_EVENT_TYPES = new Set([
@@ -52,30 +53,36 @@ function sortMessages(messages) {
   return [...messages].sort((left, right) => new Date(left.created_at || 0) - new Date(right.created_at || 0));
 }
 
-function upsertAssistantDraft(messages, payload) {
-  const turnId = payload.turn_id || payload.data?.turn_id || null;
-  const chunk = payload.data?.text || "";
-  if (!turnId || !chunk) {
-    return messages;
-  }
-  const draftId = `draft-${turnId}`;
-  const index = messages.findIndex((item) => item.message_id === draftId);
-  if (index === -1) {
-    return sortMessages([...messages, { message_id: draftId, session_id: payload.session_id, turn_id: turnId, role: "assistant", sender: "sisyphus", content: chunk, evidence_refs: [], artifact_refs: [], created_at: payload.created_at, is_draft: true }]);
-  }
-  const next = [...messages];
-  next[index] = { ...next[index], content: `${next[index].content || ""}${chunk}` };
-  return sortMessages(next);
-}
-
 function commitAssistantMessage(messages, payload) {
   const turnId = payload.turn_id || payload.data?.turn_id || null;
   const message = { message_id: payload.data.message_id, session_id: payload.session_id, turn_id: turnId, role: "assistant", sender: "sisyphus", content: payload.data.message, evidence_refs: payload.data.evidence_refs || [], artifact_refs: payload.data.artifact_refs || [], created_at: payload.created_at };
-  const filtered = messages.filter((item) => item.message_id !== `draft-${turnId}`);
-  if (filtered.some((item) => item.message_id === message.message_id)) {
-    return filtered;
+  if (messages.some((item) => item.message_id === message.message_id)) {
+    return messages;
   }
-  return sortMessages([...filtered, message]);
+  return sortMessages([...messages, message]);
+}
+
+function applySessionTitleUpdate(current, payload) {
+  if (!current?.session_id || current.session_id !== payload.session_id) {
+    return current;
+  }
+  return {
+    ...current,
+    title: payload.data?.title || current.title,
+    title_status: payload.data?.title_status || current.title_status,
+    title_source: payload.data?.title_source || current.title_source,
+    updated_at: payload.created_at || current.updated_at,
+  };
+}
+
+function applySessionSummaryTitleUpdate(sessions, payload) {
+  return sessions.map((item) => item.session_id === payload.session_id ? {
+    ...item,
+    title: payload.data?.title || item.title,
+    title_status: payload.data?.title_status || item.title_status,
+    title_source: payload.data?.title_source || item.title_source,
+    updated_at: payload.created_at || item.updated_at,
+  } : item);
 }
 
 function shouldRefreshSession(payload) {
@@ -121,8 +128,7 @@ export function useWorkspaceController(appSettings) {
   const activeTurn = useMemo(() => selectActiveTurn(turns, session?.active_turn_id), [session?.active_turn_id, turns]);
   const currentTurn = useMemo(() => selectCurrentTurn(turns, focusedTurnId, session?.active_turn_id), [focusedTurnId, session?.active_turn_id, turns]);
   const running = requestPending || Boolean(activeTurn && !TERMINAL_TURN_STATUSES.has(activeTurn.status));
-  const timeline = useMemo(() => mergeHistory(messages, events, turns), [messages, events, turns]);
-  const primaryTimeline = useMemo(() => filterPrimaryTimeline(timeline, appSettings.chatPreferences.showKeySystemCards), [appSettings.chatPreferences.showKeySystemCards, timeline]);
+  const primaryTimeline = useMemo(() => buildPrimaryTimeline(messages, events, turns, appSettings.chatPreferences.showKeySystemCards), [appSettings.chatPreferences.showKeySystemCards, events, messages, turns]);
   const activityEvents = useMemo(() => filterActivityEvents(buildInspectorActivityEvents(events, turns, messages, currentTurn?.turn_id)), [currentTurn?.turn_id, events, turns, messages]);
   const filteredSessions = useMemo(() => {
     const keyword = sessionSearch.trim().toLowerCase();
@@ -234,8 +240,9 @@ export function useWorkspaceController(appSettings) {
       const payload = normalizeTurnEvent(JSON.parse(event.data));
       if (payload.type === "assistant_message") {
         setMessages((current) => commitAssistantMessage(current, payload));
-      } else if (payload.type === "assistant_chunk") {
-        setMessages((current) => upsertAssistantDraft(current, payload));
+      } else if (payload.type === "session_title_updated") {
+        setSession((current) => applySessionTitleUpdate(current, payload));
+        setSessions((current) => applySessionSummaryTitleUpdate(current, payload));
       } else {
         setEvents((current) => current.some((item) => item.event_id === payload.event_id) ? current : [...current, payload]);
       }
@@ -255,7 +262,7 @@ export function useWorkspaceController(appSettings) {
     if (session?.session_id) {
       return session.session_id;
     }
-    const payload = await readJson(await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: message.slice(0, 60) || "DigAgent Session", profile: runtimeDraft.profile, scope: scopePayload(runtimeDraft.repoPath, runtimeDraft.domain) }) }));
+    const payload = await readJson(await fetch("/api/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "新会话", profile: runtimeDraft.profile, scope: scopePayload(runtimeDraft.repoPath, runtimeDraft.domain) }) }));
     await loadSessions(payload.session_id, true);
     return payload.session_id;
   }

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import Any
 
 from digagent.deepagents_runtime.state import PendingApproval, to_event_data
@@ -15,11 +17,16 @@ from digagent.models import (
     SessionPermissionOverrides,
     SessionRecord,
     SessionStatus,
+    SessionTitleSource,
+    SessionTitleStatus,
     TurnEvent,
     TurnRecord,
     TurnStatus,
 )
+from digagent.session_titles import generate_session_title, is_seed_title
 from digagent.utils import action_digest, new_id, utc_now
+
+logger = logging.getLogger(__name__)
 
 
 class TurnManagerOpsMixin(TurnManagerSessionMixin):
@@ -56,6 +63,88 @@ class TurnManagerOpsMixin(TurnManagerSessionMixin):
             session.scope = scope
         self.storage.save_session(session)
         return session
+
+    def _maybe_schedule_session_title(
+        self,
+        session: SessionRecord,
+        *,
+        turn_id: str,
+        message_id: str,
+        content: str,
+    ) -> None:
+        if not self._is_first_user_message(session):
+            return
+        if not self._is_seed_title_candidate(session.title, content):
+            if session.title_status == SessionTitleStatus.PENDING and session.title_source == SessionTitleSource.SEED:
+                self.storage.update_session_title_state(
+                    session.session_id,
+                    title_status=SessionTitleStatus.READY,
+                    title_source=SessionTitleSource.MANUAL,
+                )
+            return
+        if session.session_id in self._title_tasks:
+            return
+        self.storage.update_session_title_state(
+            session.session_id,
+            title_status=SessionTitleStatus.GENERATING,
+            title_source=SessionTitleSource.SEED,
+        )
+        task = asyncio.create_task(
+            self._generate_session_title(session_id=session.session_id, turn_id=turn_id, message_id=message_id, content=content)
+        )
+        self._title_tasks[session.session_id] = task
+        task.add_done_callback(lambda _: self._title_tasks.pop(session.session_id, None))
+
+    def _is_first_user_message(self, session: SessionRecord) -> bool:
+        return session.last_user_message_id is None
+
+    def _is_seed_title_candidate(self, title: str, content: str) -> bool:
+        if is_seed_title(title):
+            return True
+        return bool(title) and len(title) <= 60 and content.startswith(title)
+
+    async def _generate_session_title(self, *, session_id: str, turn_id: str, message_id: str, content: str) -> None:
+        session = self.storage.load_session(session_id)
+        try:
+            title = await generate_session_title(
+                settings=self.settings,
+                profile_name=session.root_agent_profile,
+                message=content,
+            )
+        except Exception as exc:
+            session = self.storage.update_session_title_state(session_id, title_status=SessionTitleStatus.FAILED)
+            self._emit(
+                session.session_id,
+                None,
+                "session_title_updated",
+                {
+                  "message_id": message_id,
+                  "title": session.title,
+                  "title_source": session.title_source,
+                  "title_status": session.title_status,
+                  "turn_id": turn_id,
+                },
+            )
+            logger.warning("Session title generation failed for %s: %s", session_id, exc)
+            return
+        session = self.storage.update_session_title_state(
+            session_id,
+            title=title,
+            title_status=SessionTitleStatus.READY,
+            title_source=SessionTitleSource.MODEL,
+        )
+        self._emit(
+            session.session_id,
+            None,
+            "session_title_updated",
+            {
+                "message_id": message_id,
+                "title": session.title,
+                "title_source": session.title_source,
+                "title_status": session.title_status,
+                "turn_id": turn_id,
+            },
+        )
 
     def _mark_turn_started(self, session: SessionRecord, turn: TurnRecord) -> tuple[SessionRecord, TurnRecord]:
         now = utc_now()

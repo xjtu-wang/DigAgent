@@ -10,6 +10,19 @@ import { MobileSidebar, MobileSidebarButton, SessionSidebar } from "./session-si
 import { StatusPill } from "./status-pill";
 import { Badge, Button, Textarea } from "./ui";
 
+function ClampedText({ className = "", text }) {
+  const value = text || "新聊天";
+  return (
+    <div
+      className={`overflow-hidden text-ellipsis [overflow-wrap:anywhere] ${className}`}
+      style={{ WebkitBoxOrient: "vertical", WebkitLineClamp: 1, display: "-webkit-box" }}
+      title={value}
+    >
+      {value}
+    </div>
+  );
+}
+
 function EmptyState() {
   return (
     <div className="mx-auto flex h-full max-w-3xl flex-col items-center justify-center px-6 text-center">
@@ -43,10 +56,10 @@ function WorkspaceHeader({ activeTurn, canArchiveCurrentSession, canDeleteCurren
         <div className="flex min-w-0 items-center gap-2">
           <MobileSidebarButton onClick={onOpenSidebar} />
           <div className="min-w-0">
-            <div className="truncate text-[15px] font-semibold text-slate-900">{session?.title || "新聊天"}</div>
+            <ClampedText className="text-[15px] font-semibold text-slate-900" text={session?.title} />
             <div className="flex items-center gap-2 text-xs text-slate-500">
               <StatusPill status={session?.status || "idle"} />
-              {previewTurn ? <span className="truncate">{compactText(previewTurn.goal || previewTurn.user_task || previewTurn.task, 80)}</span> : null}
+              {previewTurn ? <ClampedText className="min-w-0" text={compactText(previewTurn.goal || previewTurn.user_task || previewTurn.task, 80)} /> : null}
             </div>
           </div>
         </div>

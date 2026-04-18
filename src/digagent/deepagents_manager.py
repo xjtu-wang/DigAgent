@@ -45,6 +45,7 @@ class TurnManager(TurnManagerOpsMixin):
         self.knowledge_base = CveKnowledgeBase(self.settings, self.storage)
         self._runtimes: dict[str, Any] = {}
         self._pending_approvals: dict[str, Any] = {}
+        self._title_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def handle_message(
         self,
@@ -71,6 +72,12 @@ class TurnManager(TurnManagerOpsMixin):
         message = self._append_message(session.session_id, turn.turn_id, content, role=MessageRole.USER)
         turn.trigger_message_id = message.message_id
         self.storage.save_turn(turn)
+        self._maybe_schedule_session_title(
+            session,
+            turn_id=turn.turn_id,
+            message_id=message.message_id,
+            content=content,
+        )
         handle = self._runtimes.get(session.session_id)
         if handle is None:
             handle = await self._runtime_handle(session, auto_approve=auto_approve)

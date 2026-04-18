@@ -25,6 +25,8 @@ from digagent.models import (
     Scope,
     SessionRecord,
     SessionStatus,
+    SessionTitleSource,
+    SessionTitleStatus,
     TurnRecord,
     WikiEntry,
 )
@@ -155,11 +157,21 @@ class FileStorage:
     def cve_index_path(self, name: str) -> Path:
         return self.cve_index_dir() / f"{name}.json"
 
-    def create_session(self, title: str, root_agent_profile: str, scope: Scope) -> SessionRecord:
+    def create_session(
+        self,
+        title: str,
+        root_agent_profile: str,
+        scope: Scope,
+        *,
+        title_status: SessionTitleStatus = SessionTitleStatus.READY,
+        title_source: SessionTitleSource = SessionTitleSource.MANUAL,
+    ) -> SessionRecord:
         now = utc_now()
         session = SessionRecord(
             session_id=new_id("sess"),
             title=title,
+            title_status=title_status,
+            title_source=title_source,
             created_at=now,
             updated_at=now,
             root_agent_profile=root_agent_profile,
@@ -209,6 +221,24 @@ class FileStorage:
         updated.updated_at = utc_now()
         self.save_session(updated)
         return updated
+
+    def update_session_title_state(
+        self,
+        session_id: str,
+        *,
+        title_status: SessionTitleStatus,
+        title_source: SessionTitleSource | None = None,
+        title: str | None = None,
+    ) -> SessionRecord:
+        def updater(session: SessionRecord) -> SessionRecord:
+            session.title_status = title_status
+            if title_source is not None:
+                session.title_source = title_source
+            if title is not None:
+                session.title = title
+            return session
+
+        return self.update_session(session_id, updater)
 
     def load_messages(self, session_id: str) -> list[MessageRecord]:
         path = self.session_messages_path(session_id)

@@ -10,8 +10,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from digagent.config import current_env_summary, get_settings
-from digagent.models import Scope, SessionPermissionOverrides
+from digagent.models import Scope, SessionPermissionOverrides, SessionTitleSource, SessionTitleStatus
 from digagent.runtime import TurnManager
+from digagent.session_titles import DEFAULT_SESSION_TITLE, is_seed_title
 
 
 class CreateSessionRequest(BaseModel):
@@ -124,7 +125,14 @@ def create_app(manager: TurnManager | None = None) -> FastAPI:
 
     @app.post("/api/sessions")
     async def create_session(body: CreateSessionRequest):
-        session = manager.create_session(title=body.title, profile_name=body.profile, scope=body.scope)
+        title = body.title or DEFAULT_SESSION_TITLE
+        session = manager.storage.create_session(
+            title=title,
+            root_agent_profile=body.profile,
+            scope=body.scope,
+            title_status=SessionTitleStatus.PENDING if is_seed_title(title) else SessionTitleStatus.READY,
+            title_source=SessionTitleSource.SEED if is_seed_title(title) else SessionTitleSource.MANUAL,
+        )
         return serialize_session_summary(session)
 
     @app.get("/api/sessions")
@@ -189,7 +197,14 @@ def create_app(manager: TurnManager | None = None) -> FastAPI:
     async def create_turn(body: CreateTurnRequest):
         session_id = body.session_id
         if session_id is None:
-            session = manager.create_session(title=body.title or body.task[:60], profile_name=body.profile, scope=body.scope)
+            title = body.title or DEFAULT_SESSION_TITLE
+            session = manager.storage.create_session(
+                title=title,
+                root_agent_profile=body.profile,
+                scope=body.scope,
+                title_status=SessionTitleStatus.PENDING if is_seed_title(title) else SessionTitleStatus.READY,
+                title_source=SessionTitleSource.SEED if is_seed_title(title) else SessionTitleSource.MANUAL,
+            )
             session_id = session.session_id
         session, result = await manager.handle_message(
             session_id=session_id,

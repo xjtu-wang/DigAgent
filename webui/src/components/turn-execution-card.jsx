@@ -1,6 +1,7 @@
 import React from "react";
 import { ChevronDown, ChevronUp, Download, FileJson, FileText, Gauge, Sparkles } from "lucide-react";
 import { formatTime } from "../chat-utils";
+import { MarkdownBlock } from "./markdown-block";
 import { ReportInline, renderInlineEvidence } from "./timeline-inline";
 import { Badge, Button } from "./ui";
 
@@ -11,7 +12,7 @@ function SummaryRow({ label, value }) {
   return (
     <div className="grid gap-1">
       <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">{label}</div>
-      <div className="text-sm leading-7 text-slate-700">{value}</div>
+      <MarkdownBlock content={value} />
     </div>
   );
 }
@@ -25,10 +26,10 @@ function EventPreview({ items }) {
       {items.map((item) => (
         <div key={item.event_id} className="rounded-2xl bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
           <div className="flex items-center justify-between gap-3 text-[11px] text-slate-400">
-            <span>{item.type}</span>
+            <span className="truncate" title={item.type}>{item.type}</span>
             <span>{formatTime(item.created_at)}</span>
           </div>
-          <div className="mt-1.5 leading-6 text-slate-700">{item.summary}</div>
+          <MarkdownBlock className="mt-1.5" content={item.summary} variant="muted" />
         </div>
       ))}
     </div>
