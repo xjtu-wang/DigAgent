@@ -68,7 +68,7 @@ function MessageBubble({ density, evidenceState, item, onToggleEvidence }) {
   }
   return (
     <div className="flex justify-end">
-      <div className="max-w-[85%]">
+      <div className="min-w-0 max-w-[85%]">
         <div className={`rounded-[1.4rem] bg-[#f4f4f4] px-4 py-2.5 text-slate-900 ${textClass}`}>
           <MarkdownBlock className="text-slate-900" content={message} variant="body" />
         </div>
@@ -171,7 +171,7 @@ function ToolSummaryCard({ item }) {
   const callArgs = stringifyValue(data.call_args);
   const rawOutput = firstText(data.raw_output, stringifyValue(data.raw_output_object));
   return (
-    <div className="rounded-[1.6rem] border border-slate-200 bg-white px-5 py-4 shadow-[0_18px_44px_rgba(15,23,42,0.05)]">
+    <div className="min-w-0 rounded-[1.6rem] border border-slate-200 bg-white px-5 py-4 shadow-[0_18px_44px_rgba(15,23,42,0.05)]">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-slate-900">
@@ -185,9 +185,9 @@ function ToolSummaryCard({ item }) {
         <div className="text-[11px] text-slate-400">{formatTime(item.created_at)}</div>
       </div>
       {data.source_url ? (
-        <a href={data.source_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-sm text-sky-700 hover:text-sky-800">
-          <ExternalLink size={13} />
-          <span className="truncate">{data.source_url}</span>
+        <a href={data.source_url} target="_blank" rel="noreferrer" className="mt-3 flex min-w-0 max-w-full items-start gap-1 text-sm text-sky-700 hover:text-sky-800">
+          <ExternalLink size={13} className="mt-1 shrink-0" />
+          <span className="min-w-0 break-all [overflow-wrap:anywhere]">{data.source_url}</span>
         </a>
       ) : null}
       <FactGrid facts={data.facts} />
@@ -264,7 +264,7 @@ export function ChatTimeline(props) {
   const timelineApprovalIds = new Set(timeline.map((item) => item?.data?.approval_id).filter(Boolean));
   const visiblePendingApprovals = pendingApprovals.filter((item) => !timelineApprovalIds.has(item.approval_id));
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+    <div className="mx-auto flex min-w-0 w-full max-w-3xl flex-col gap-6">
       {timeline.map((item) => <TimelineItem key={item.event_id} {...props} item={item} />)}
       {visiblePendingApprovals.map((approval) => (
         <ApprovalCard

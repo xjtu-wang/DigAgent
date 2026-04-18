@@ -118,7 +118,7 @@ export function TurnExecutionCard({
       {expanded ? (
         <div className="mt-4 grid gap-3 rounded-[1.4rem] border border-slate-200 bg-slate-50 p-4">
           <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">原始 turn / 事件</div>
-          <pre className="overflow-x-auto whitespace-pre-wrap text-xs leading-6 text-slate-700">{JSON.stringify(data.raw, null, 2)}</pre>
+          <pre className="overflow-x-auto whitespace-pre-wrap break-words text-xs leading-6 text-slate-700 [overflow-wrap:anywhere]">{JSON.stringify(data.raw, null, 2)}</pre>
         </div>
       ) : null}
     </div>

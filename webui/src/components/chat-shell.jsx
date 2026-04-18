@@ -162,7 +162,7 @@ export function WorkspacePage({ catalog, controller, onOpenSettings, settings })
           <WorkspaceHeader activeTurn={controller.activeTurn} canArchiveCurrentSession={controller.canArchiveCurrentSession} canDeleteCurrentSession={controller.canDeleteCurrentSession} currentTurn={controller.currentTurn} inspectorOpen={inspectorOpen} onDeleteSession={controller.deleteSessionById} onOpenPermissions={() => setPermissionsOpen(true)} onOpenSettings={onOpenSettings} onOpenSidebar={() => setSidebarOpen(true)} onStartFreshSession={controller.startFreshSession} onToggleArchive={() => void controller.toggleArchive()} onToggleInspector={() => setInspectorOpen((value) => !value)} permissionBadge={permissionCount > 0 ? permissionCount : null} session={controller.session} />
 
           <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
-            <div className="flex-1 overflow-y-auto px-4 py-6 md:px-6">
+            <div className="flex-1 overflow-x-hidden overflow-y-auto px-4 py-6 md:px-6">
               {controller.primaryTimeline.length === 0 && controller.pendingApprovals.length === 0 ? (
                 <EmptyState />
               ) : (

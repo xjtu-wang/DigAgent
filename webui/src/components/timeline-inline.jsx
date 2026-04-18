@@ -104,7 +104,7 @@ export function CollapsibleSection({ code = false, content, label }) {
   return (
     <details className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
       <summary className="cursor-pointer list-none text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{label}</summary>
-      {code ? <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-xl bg-slate-950 px-3 py-2.5 text-xs leading-6 text-slate-100">{content}</pre> : <MarkdownBlock className="mt-2" content={content} />}
+      {code ? <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words rounded-xl bg-slate-950 px-3 py-2.5 text-xs leading-6 text-slate-100 [overflow-wrap:anywhere]">{content}</pre> : <MarkdownBlock className="mt-2" content={content} />}
     </details>
   );
 }
