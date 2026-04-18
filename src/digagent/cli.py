@@ -10,7 +10,7 @@ from rich.panel import Panel
 
 from digagent.api import create_app
 from digagent.models import Scope
-from digagent.runtime import RunManager
+from digagent.runtime import TurnManager
 
 app = typer.Typer(help="DigAgent CLI")
 console = Console()
@@ -20,21 +20,21 @@ def _parse_scope(repo: list[str], domain: list[str], artifact: list[str]) -> Sco
     return Scope(repo_paths=repo, allowed_domains=domain, artifacts=artifact)
 
 
-async def _print_new_events(manager: RunManager, session_id: str, start_index: int, run_id: str | None) -> int:
-    stop_statuses = {"completed", "failed", "awaiting_approval", "awaiting_user_input"}
+async def _print_new_events(manager: TurnManager, session_id: str, start_index: int, turn_id: str | None) -> int:
+    stop_statuses = {"completed", "failed", "timed_out", "awaiting_approval", "awaiting_user_input"}
     while True:
-        history = manager.event_history.get(session_id, [])
+        history = manager.load_session_event_history(session_id)
         emitted = False
         while start_index < len(history):
             event = history[start_index]
             start_index += 1
-            if run_id and event.run_id not in {None, run_id}:
+            if turn_id and event.turn_id not in {None, turn_id}:
                 continue
             console.print(Panel(json.dumps(event.data, ensure_ascii=False, indent=2), title=event.type))
             emitted = True
-            if event.run_id == run_id and event.type in stop_statuses:
+            if event.turn_id == turn_id and event.type in stop_statuses:
                 return start_index
-        if emitted and not run_id:
+        if emitted and not turn_id:
             return start_index
         await asyncio.sleep(0.05)
 
@@ -49,20 +49,20 @@ def run(
     auto_approve: bool = typer.Option(False, "--auto-approve"),
 ) -> None:
     async def runner() -> None:
-        manager = RunManager()
+        manager = TurnManager()
         session = manager.create_session(title=task[:60], profile_name=profile, scope=_parse_scope(repo, domain, artifact))
-        cursor = len(manager.event_history.get(session.session_id, []))
-        _, turn = await manager.handle_message(
+        cursor = len(manager.load_session_event_history(session.session_id))
+        _, result = await manager.handle_message(
             session_id=session.session_id,
             content=task,
             profile_name=profile,
             scope=_parse_scope(repo, domain, artifact),
             auto_approve=auto_approve,
         )
-        if turn.run_id:
-            await _print_new_events(manager, session.session_id, cursor, turn.run_id)
-        elif turn.assistant_message:
-            console.print(turn.assistant_message)
+        if result.turn_id:
+            await _print_new_events(manager, session.session_id, cursor, result.turn_id)
+        elif result.assistant_message:
+            console.print(result.assistant_message)
 
     asyncio.run(runner())
 
@@ -77,22 +77,22 @@ def chat(
     auto_approve: bool = typer.Option(False, "--auto-approve"),
 ) -> None:
     async def runner() -> None:
-        manager = RunManager()
+        manager = TurnManager()
         scope = _parse_scope(repo, domain, artifact)
         session = manager.create_session(title=(task or "DigAgent Session")[:60], profile_name=profile, scope=scope)
         if task:
-            cursor = len(manager.event_history.get(session.session_id, []))
-            _, turn = await manager.handle_message(
+            cursor = len(manager.load_session_event_history(session.session_id))
+            _, result = await manager.handle_message(
                 session_id=session.session_id,
                 content=task,
                 profile_name=profile,
                 scope=scope,
                 auto_approve=auto_approve,
             )
-            if turn.run_id:
-                await _print_new_events(manager, session.session_id, cursor, turn.run_id)
-            elif turn.assistant_message:
-                console.print(turn.assistant_message)
+            if result.turn_id:
+                await _print_new_events(manager, session.session_id, cursor, result.turn_id)
+            elif result.assistant_message:
+                console.print(result.assistant_message)
             return
 
         console.print(f"Session: {session.session_id}")
@@ -100,18 +100,18 @@ def chat(
             text = typer.prompt("Message").strip()
             if text.lower() in {"exit", "quit"}:
                 break
-            cursor = len(manager.event_history.get(session.session_id, []))
-            _, turn = await manager.handle_message(
+            cursor = len(manager.load_session_event_history(session.session_id))
+            _, result = await manager.handle_message(
                 session_id=session.session_id,
                 content=text,
                 profile_name=profile,
                 scope=scope,
                 auto_approve=auto_approve,
             )
-            if turn.run_id:
-                await _print_new_events(manager, session.session_id, cursor, turn.run_id)
-            elif turn.assistant_message:
-                console.print(turn.assistant_message)
+            if result.turn_id:
+                await _print_new_events(manager, session.session_id, cursor, result.turn_id)
+            elif result.assistant_message:
+                console.print(result.assistant_message)
 
     asyncio.run(runner())
 
@@ -124,15 +124,12 @@ def approve(
     reason: str = typer.Option("", "--reason"),
 ) -> None:
     async def runner() -> None:
-        manager = RunManager()
-        pending = manager.storage.load_approval(approval_id)
-        token = manager._approval_token_value(pending, approved=approved, resolver=resolver)
+        manager = TurnManager()
         approval = await manager.approve(
             approval_id,
             approved=approved,
             resolver=resolver,
             reason=reason or None,
-            approval_token=token,
         )
         console.print_json(data=approval.model_dump(mode="json"))
 
@@ -152,7 +149,7 @@ def cve_sync(
     max_records: int = typer.Option(200, "--max-records", min=1, help="Limit records for the current sync run."),
 ) -> None:
     async def runner() -> None:
-        manager = RunManager()
+        manager = TurnManager()
         payload = await manager.sync_cve(max_records=max_records)
         console.print_json(data=payload)
 
@@ -161,7 +158,7 @@ def cve_sync(
 
 @app.command("cve-status")
 def cve_status() -> None:
-    manager = RunManager()
+    manager = TurnManager()
     console.print_json(data=manager.cve_status())
 
 
@@ -173,7 +170,7 @@ def cve_search(
     product: str = typer.Option("", "--product"),
     limit: int = typer.Option(10, "--limit", min=1, max=100),
 ) -> None:
-    manager = RunManager()
+    manager = TurnManager()
     payload = manager.search_cve(
         query=query,
         cve_id=cve_id or None,
@@ -182,3 +179,48 @@ def cve_search(
         limit=limit,
     )
     console.print_json(data={"items": payload, "state": manager.cve_status()})
+
+
+@app.command("tools-doctor")
+def tools_doctor(
+    query: str = typer.Option("example", "--query", help="web_search smoke query"),
+    url: str = typer.Option("https://example.com", "--url", help="web_fetch smoke URL"),
+) -> None:
+    """对网络工具做健康检查，输出 OK / DEGRADED / FAIL。"""
+    from digagent.config import AppSettings
+    from digagent.toolsets.network import NetworkToolset
+
+    async def runner() -> None:
+        toolset = NetworkToolset(AppSettings())
+        report: dict[str, dict] = {}
+        try:
+            _, summary, _, facts, source, _, _ = await toolset.web_search({"query": query, "limit": 5})
+            fact_map = {f["key"]: f["value"] for f in facts}
+            status = "OK"
+            if not fact_map.get("provider_reachable", True):
+                status = "FAIL"
+            elif not fact_map.get("provider_usable", True):
+                status = "FAIL"
+            elif fact_map.get("empty_result"):
+                status = "DEGRADED"
+            report["web_search"] = {"status": status, "summary": summary, "facts": fact_map, "source": source}
+        except Exception as exc:
+            report["web_search"] = {"status": "FAIL", "error": f"{type(exc).__name__}: {exc}"}
+        try:
+            _, summary, _, facts, source, _, _ = await toolset.web_fetch({"url": url})
+            fact_map = {f["key"]: f["value"] for f in facts}
+            status = "OK"
+            if fact_map.get("transport_error"):
+                status = "FAIL"
+            elif fact_map.get("error_status"):
+                status = "DEGRADED"
+            report["web_fetch"] = {"status": status, "summary": summary, "facts": fact_map, "source": source}
+        except Exception as exc:
+            report["web_fetch"] = {"status": "FAIL", "error": f"{type(exc).__name__}: {exc}"}
+        typer.echo(json.dumps(report, ensure_ascii=False, indent=2))
+
+    asyncio.run(runner())
+
+
+if __name__ == "__main__":
+    app()

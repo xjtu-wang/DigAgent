@@ -3,7 +3,7 @@ from __future__ import annotations
 from digagent.models import Finding, ReportDossier, ReportDraft
 from digagent.utils import new_id
 
-ALLOWED_REPORT_KINDS = {"writeup", "pentest_report", "code_review_report", "analysis_note"}
+ALLOWED_REPORT_KINDS = {"writeup", "pentest_report", "code_review_report", "analysis_note", "execution_summary"}
 
 
 class ReportValidationError(RuntimeError):

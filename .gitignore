@@ -13,6 +13,7 @@ data/sessions/*/runs/
 .venv
 CTF-Sandbox-Orchestrator
 .codex
+.claude
 .env
 AGENTS.md
 

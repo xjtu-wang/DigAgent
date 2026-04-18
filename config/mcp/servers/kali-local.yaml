@@ -1,0 +1,41 @@
+server_id: kali-local
+name: Kali Local
+description: 本地 Kali 工具编排 MCP 入口，适合 CTF 与攻防分析中的工具链调用。
+enabled: false
+transport:
+  type: stdio
+  command: mcp-kali-server
+  args: []
+related_skills:
+  - ctf-sandbox-orchestrator
+  - competition-web-api
+  - competition-reverse-native
+  - competition-agent-cloud
+  - competition-crypto-mobile
+default_risk_tags:
+  - shell_exec
+  - external_exploit
+advertised_tools:
+  - name: nmap_scan
+    description: 执行目标枚举与端口发现。
+    input_schema:
+      type: object
+      properties:
+        target:
+          type: string
+  - name: metasploit_run
+    description: 执行 Metasploit 模块验证或利用。
+    input_schema:
+      type: object
+      properties:
+        module:
+          type: string
+    risk_tags:
+      - external_exploit
+  - name: binwalk_analyze
+    description: 分析固件或二进制打包结构。
+    input_schema:
+      type: object
+      properties:
+        path:
+          type: string

@@ -1,3 +1,3 @@
-from digagent.agent.runtime import RunManager, SessionManager
+from digagent.deepagents_manager import SessionManager, TurnManager
 
-__all__ = ["RunManager", "SessionManager"]
+__all__ = ["TurnManager", "SessionManager"]

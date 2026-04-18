@@ -1,0 +1,202 @@
+import { compactText } from "./chat-utils.js";
+import { buildTurnTimelineEntries } from "./turn-utils.js";
+
+export const KEY_CHAT_EVENT_TYPES = new Set([
+  "approval_required",
+  "approval_expired",
+  "approval_superseded",
+]);
+
+export const SYSTEM_ACTIVITY_TYPES = new Set([
+  "turn_recorded",
+  "user_task_recorded",
+  "assistant_response_recorded",
+  "turn_terminal_recorded",
+  "plan",
+  "task_node_started",
+  "task_node_completed",
+  "task_node_waiting_approval",
+  "task_node_waiting_user_input",
+  "graph_op_applied",
+  "awaiting_approval",
+  "approval_required",
+  "approval_resolved",
+  "approval_superseded",
+  "tool_result",
+  "evidence_added",
+  "subagent",
+  "aggregate",
+  "report_ready",
+  "export",
+  "completed",
+  "failed",
+  "approval_expired",
+  "timed_out",
+  "awaiting_user_input",
+  "cancelled",
+  "turn_superseded",
+]);
+
+export const systemEventLabels = {
+  turn_recorded: "执行已记录",
+  user_task_recorded: "用户目标",
+  assistant_response_recorded: "答复已记录",
+  turn_terminal_recorded: "执行结束",
+  plan: "任务规划",
+  task_node_started: "步骤开始",
+  task_node_completed: "步骤完成",
+  task_node_waiting_approval: "步骤等待审批",
+  task_node_waiting_user_input: "步骤等待补充",
+  graph_op_applied: "Workflow 更新",
+  awaiting_approval: "等待审批",
+  approval_required: "等待审批",
+  approval_resolved: "审批完成",
+  approval_superseded: "审批已被替代",
+  tool_result: "工具结果",
+  evidence_added: "新增证据",
+  subagent: "子 Agent",
+  aggregate: "汇总",
+  report_ready: "报告生成",
+  export: "导出完成",
+  approval_expired: "审批过期",
+  awaiting_user_input: "等待补充信息",
+  completed: "执行完成",
+  failed: "执行失败",
+  timed_out: "执行超时",
+  cancelled: "执行已取消",
+  turn_superseded: "执行已被替代",
+};
+
+const TYPE_ORDER = {
+  local_user: 0,
+  turn_card: 1,
+  approval_required: 2,
+  approval_superseded: 3,
+  approval_expired: 4,
+  assistant_message: 5,
+};
+
+function compareTimelineItems(left, right) {
+  const timeDelta = new Date(left.created_at || 0) - new Date(right.created_at || 0);
+  if (timeDelta !== 0) {
+    return timeDelta;
+  }
+  const leftWeight = TYPE_ORDER[left.type] ?? 10;
+  const rightWeight = TYPE_ORDER[right.type] ?? 10;
+  if (leftWeight !== rightWeight) {
+    return leftWeight - rightWeight;
+  }
+  return String(left.event_id || "").localeCompare(String(right.event_id || ""));
+}
+
+export function mergeHistory(messages, events, turns) {
+  const messageEntries = messages.map((message) => ({
+    event_id: `msg-${message.message_id}`,
+    session_id: message.session_id,
+    turn_id: message.turn_id,
+    type: message.role === "user" ? "local_user" : "assistant_message",
+    created_at: message.created_at,
+    data: {
+      message: message.content,
+      message_id: message.message_id,
+      evidence_refs: message.evidence_refs || [],
+      artifact_refs: message.artifact_refs || [],
+      turn_id: message.turn_id || null,
+    },
+  }));
+  const turnEntries = buildTurnTimelineEntries(turns, messages, events);
+  return [...messageEntries, ...turnEntries, ...events].sort(compareTimelineItems);
+}
+
+export function filterPrimaryTimeline(timeline, showKeySystemCards = true) {
+  return timeline.filter((item) => {
+    if (item.type === "local_user" || item.type === "assistant_message" || item.type === "turn_card") {
+      return true;
+    }
+    return showKeySystemCards && KEY_CHAT_EVENT_TYPES.has(item.type);
+  });
+}
+
+export function filterActivityEvents(events) {
+  return events
+    .filter((item) => SYSTEM_ACTIVITY_TYPES.has(item.type))
+    .sort((left, right) => new Date(right.created_at || 0) - new Date(left.created_at || 0));
+}
+
+export function eventSummary(item) {
+  const data = item.data || {};
+  if (item.type === "turn_recorded") {
+    return compactText(data.goal || data.turn_id || "已记录执行", 120);
+  }
+  if (item.type === "user_task_recorded") {
+    return compactText(data.goal || "已记录用户目标", 120);
+  }
+  if (item.type === "assistant_response_recorded") {
+    return compactText(data.preview || "已记录助手答复", 120);
+  }
+  if (item.type === "turn_terminal_recorded") {
+    const status = data.status ? String(data.status).replaceAll("_", " ") : "completed";
+    return `执行结束 · ${status}`;
+  }
+  if (item.type === "plan") {
+    return `已生成 ${data.nodes?.length || 0} 个 workflow 步骤`;
+  }
+  if (item.type === "task_node_started" || item.type === "task_node_completed") {
+    return data.title || data.node_id || systemEventLabels[item.type];
+  }
+  if (item.type === "task_node_waiting_approval") {
+    return data.reason || "步骤等待审批";
+  }
+  if (item.type === "task_node_waiting_user_input" || item.type === "awaiting_user_input") {
+    return data.question || data.prompt || "等待补充信息";
+  }
+  if (item.type === "awaiting_approval") {
+    return `等待审批${Array.isArray(data.approval_ids) && data.approval_ids.length ? ` (${data.approval_ids.length})` : ""}`;
+  }
+  if (item.type === "graph_op_applied") {
+    return data.op_type || "工作流已更新";
+  }
+  if (item.type === "tool_result") {
+    return data.summary || data.title || "工具执行完成";
+  }
+  if (item.type === "evidence_added") {
+    return data.title || data.evidence_id || "新增证据";
+  }
+  if (item.type === "subagent") {
+    return data.result?.summary || data.task?.goal || "子 Agent 已返回结果";
+  }
+  if (item.type === "aggregate") {
+    return data.summary || "已完成阶段汇总";
+  }
+  if (item.type === "report_ready") {
+    return `报告 ${data.report_id || ""} 已生成`;
+  }
+  if (item.type === "export") {
+    return "导出已完成";
+  }
+  if (item.type === "completed") {
+    return data.summary || "本轮执行已完成";
+  }
+  if (item.type === "failed") {
+    return data.error || "本轮执行失败";
+  }
+  if (item.type === "approval_expired") {
+    return data.reason || "审批已过期";
+  }
+  if (item.type === "timed_out") {
+    return data.reason || "本轮执行超时";
+  }
+  if (item.type === "approval_resolved") {
+    return data.status === "approved" ? "审批已通过，继续执行" : "审批已拒绝";
+  }
+  if (item.type === "approval_superseded") {
+    return data.reason || "当前审批已被新的动作替代";
+  }
+  if (item.type === "cancelled") {
+    return "本轮执行已取消";
+  }
+  if (item.type === "turn_superseded") {
+    return data.reason || "当前执行已被新的消息替代";
+  }
+  return systemEventLabels[item.type] || item.type;
+}

@@ -51,7 +51,7 @@ class PluginCatalog:
     def _load_manifest(self, manifest_path: Path) -> PluginManifest:
         plugin_root = manifest_path.parent.parent
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-        command_payloads = [self._load_command(plugin_root.name, path) for path in sorted((plugin_root / "commands").glob("*.yaml"))]
+        command_payloads = [self._load_command(plugin_root, path) for path in sorted((plugin_root / "commands").glob("*.yaml"))]
         payload["path"] = str(plugin_root)
         payload["references"] = self._reference_paths(plugin_root)
         payload["commands"] = command_payloads
@@ -59,11 +59,21 @@ class PluginCatalog:
         payload["agent_config_path"] = str(agent_path) if agent_path.exists() else None
         return PluginManifest.model_validate(payload)
 
-    def _load_command(self, plugin_id: str, path: Path) -> dict[str, object]:
+    def _load_command(self, plugin_root: Path, path: Path) -> dict[str, object]:
         payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        plugin_id = plugin_root.name
         payload.setdefault("plugin_id", plugin_id)
         if payload.get("script_path"):
-            payload["script_path"] = str((path.parent.parent / payload["script_path"]).resolve())
+            payload["script_path"] = str((plugin_root / payload["script_path"]).resolve())
+        default_targets = dict(payload.get("default_targets") or {})
+        resolved_paths: list[str] = []
+        for raw_path in default_targets.get("paths", []):
+            candidate = Path(str(raw_path))
+            resolved = candidate.resolve() if candidate.is_absolute() else (plugin_root / candidate).resolve()
+            resolved_paths.append(str(resolved))
+        if resolved_paths:
+            default_targets["paths"] = resolved_paths
+            payload["default_targets"] = default_targets
         return payload
 
     def _reference_paths(self, plugin_root: Path) -> list[str]:

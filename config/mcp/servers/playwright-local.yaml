@@ -1,0 +1,33 @@
+server_id: playwright-local
+name: Playwright Local
+description: 本地浏览器自动化 MCP 入口，适合网页交互、抓取与渲染验证。
+enabled: false
+transport:
+  type: stdio
+  command: playwright-mcp
+  args: []
+related_skills:
+  - ctf-sandbox-orchestrator
+  - competition-web-api
+default_risk_tags:
+  - network
+advertised_tools:
+  - name: browser_navigate
+    description: 打开指定页面并等待渲染完成。
+    input_schema:
+      type: object
+      properties:
+        url:
+          type: string
+  - name: browser_snapshot
+    description: 截取当前页面 DOM 或可视快照。
+    input_schema:
+      type: object
+      properties: {}
+  - name: browser_click
+    description: 与页面元素交互并推动运行路径。
+    input_schema:
+      type: object
+      properties:
+        selector:
+          type: string

@@ -5,10 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from digagent.api import create_app
-from digagent.config import AppSettings
-from digagent.runtime import RunManager
-
+from tests.runtime_import_stubs import load_runtime_api
 
 @pytest.fixture()
 def repo_root() -> Path:
@@ -16,7 +13,9 @@ def repo_root() -> Path:
 
 
 @pytest.fixture()
-def test_settings(tmp_path: Path, repo_root: Path) -> AppSettings:
+def test_settings(tmp_path: Path, repo_root: Path):
+    from digagent.config import AppSettings
+
     data_dir = tmp_path / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
     shutil.copytree(repo_root / "data" / "skills", data_dir / "skills")
@@ -24,7 +23,7 @@ def test_settings(tmp_path: Path, repo_root: Path) -> AppSettings:
         OPENAI_API_KEY="test-key",
         BASE_URL="https://example.invalid/v1",
         MODEL="fake-model",
-        DIGAGENT_USE_FAKE_MODEL=True,
+        DIGAGENT_USE_FAKE_MODEL=False,
         workspace_root=repo_root,
         config_dir=repo_root / "config",
         data_dir=data_dir,
@@ -34,18 +33,24 @@ def test_settings(tmp_path: Path, repo_root: Path) -> AppSettings:
 
 
 @pytest.fixture()
-def manager(test_settings: AppSettings) -> RunManager:
-    manager = RunManager(test_settings)
+def storage(test_settings):
+    from digagent.storage import FileStorage
 
-    def export_stub(html_path: Path, output_path: Path) -> bytes:
-        pdf = b"%PDF-1.4\n% DigAgent Test PDF\n"
-        output_path.write_bytes(pdf)
-        return pdf
-
-    manager.reporter.export_pdf = export_stub
-    return manager
+    return FileStorage(test_settings)
 
 
 @pytest.fixture()
-def app(manager: RunManager):
+def runtime_modules(monkeypatch):
+    return load_runtime_api(monkeypatch)
+
+
+@pytest.fixture()
+def manager(test_settings, runtime_modules):
+    turn_manager, _ = runtime_modules
+    return turn_manager(test_settings)
+
+
+@pytest.fixture()
+def app(manager, runtime_modules):
+    _, create_app = runtime_modules
     return create_app(manager)

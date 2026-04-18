@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import shutil
 from pathlib import Path
 from typing import Any, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from digagent.config import AppSettings, get_settings
 from digagent.models import (
@@ -14,20 +16,22 @@ from digagent.models import (
     ApprovalRecord,
     ArtifactRecord,
     AuditEvent,
+    TurnEvent,
     DailyMemoryNote,
     EvidenceRecord,
     MemoryRecord,
     MessageRecord,
     ReportRecord,
-    RunRecord,
     Scope,
     SessionRecord,
     SessionStatus,
+    TurnRecord,
     WikiEntry,
 )
 from digagent.utils import ensure_parent, json_dumps, new_id, utc_now
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
+logger = logging.getLogger(__name__)
 
 
 class FileStorage:
@@ -48,6 +52,7 @@ class FileStorage:
             "skills",
             "plugins",
             "tools",
+            "mcp",
             "agents",
             "CVE/raw",
             "CVE/normalized",
@@ -72,6 +77,12 @@ class FileStorage:
             handle.write(json.dumps(model.model_dump(mode="json"), ensure_ascii=False))
             handle.write("\n")
 
+    def _unlink_if_exists(self, path: Path) -> None:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return
+
     def session_dir(self, session_id: str) -> Path:
         return self.root / "sessions" / session_id
 
@@ -81,11 +92,11 @@ class FileStorage:
     def session_messages_path(self, session_id: str) -> Path:
         return self.session_dir(session_id) / "messages.ndjson"
 
-    def run_json_path(self, session_id: str, run_id: str) -> Path:
-        return self.session_dir(session_id) / "runs" / f"{run_id}.json"
+    def turn_json_path(self, session_id: str, turn_id: str) -> Path:
+        return self.session_dir(session_id) / "turns" / f"{turn_id}.json"
 
-    def audit_path(self, session_id: str, run_id: str) -> Path:
-        return self.session_dir(session_id) / "runs" / f"{run_id}.audit.ndjson"
+    def turn_events_path(self, session_id: str, turn_id: str) -> Path:
+        return self.session_dir(session_id) / "turns" / f"{turn_id}.events.ndjson"
 
     def approval_path(self, approval_id: str) -> Path:
         return self.root / "sessions" / "_approvals" / f"{approval_id}.json"
@@ -111,8 +122,8 @@ class FileStorage:
     def artifact_json_path(self, artifact_id: str) -> Path:
         return self.root / "artifacts" / f"{artifact_id}.json"
 
-    def artifact_blob_path(self, run_id: str, artifact_id: str, suffix: str) -> Path:
-        return self.root / "artifacts" / "blob" / run_id / f"{artifact_id}{suffix}"
+    def artifact_blob_path(self, turn_id: str, artifact_id: str, suffix: str) -> Path:
+        return self.root / "artifacts" / "blob" / turn_id / f"{artifact_id}{suffix}"
 
     def report_json_path(self, report_id: str) -> Path:
         return self.root / "reports" / f"{report_id}.json"
@@ -161,12 +172,21 @@ class FileStorage:
         self._write_json(self.session_json_path(session.session_id), session)
 
     def load_session(self, session_id: str) -> SessionRecord:
-        return self._read_json(self.session_json_path(session_id), SessionRecord)
+        session = self._read_json(self.session_json_path(session_id), SessionRecord)
+        if session.schema_version != "2.0":
+            raise ValueError(f"Legacy session schema is not supported: {session_id}")
+        return session
 
     def list_sessions(self) -> list[SessionRecord]:
         sessions: list[SessionRecord] = []
         for path in sorted(self.root.glob("sessions/*/session.json")):
-            sessions.append(self._read_json(path, SessionRecord))
+            try:
+                session = self._read_json(path, SessionRecord)
+            except ValidationError:
+                continue
+            if session.schema_version != "2.0":
+                continue
+            sessions.append(session)
         return sorted(sessions, key=lambda item: item.updated_at, reverse=True)
 
     def append_message(self, message: MessageRecord) -> None:
@@ -178,6 +198,17 @@ class FileStorage:
         elif message.role.value == "assistant":
             session.last_agent_message_id = message.message_id
         self.save_session(session)
+
+    def update_session(
+        self,
+        session_id: str,
+        updater,
+    ) -> SessionRecord:
+        session = self.load_session(session_id)
+        updated = updater(session) or session
+        updated.updated_at = utc_now()
+        self.save_session(updated)
+        return updated
 
     def load_messages(self, session_id: str) -> list[MessageRecord]:
         path = self.session_messages_path(session_id)
@@ -203,22 +234,64 @@ class FileStorage:
         self.save_session(session)
         return session
 
-    def create_run(
+    def delete_session(self, session_id: str) -> None:
+        session = self.load_session(session_id)
+        turns = self.list_turns(session_id)
+        approval_ids = set(session.pending_approval_ids)
+        evidence_ids = set(session.evidence_refs)
+        report_ids = set(session.report_refs)
+        artifact_ids: set[str] = set()
+
+        for turn in turns:
+            approval_ids.update(turn.approval_ids)
+            evidence_ids.update(turn.evidence_ids)
+            artifact_ids.update(turn.artifact_ids)
+            if turn.report_id:
+                report_ids.add(turn.report_id)
+
+        for evidence_id in evidence_ids:
+            evidence_path = self.evidence_path(evidence_id)
+            if not evidence_path.exists():
+                continue
+            evidence = self._read_json(evidence_path, EvidenceRecord)
+            artifact_ids.update(evidence.artifact_refs)
+            self._unlink_if_exists(evidence_path)
+
+        for artifact_id in artifact_ids:
+            artifact_json = self.artifact_json_path(artifact_id)
+            if artifact_json.exists():
+                artifact = self._read_json(artifact_json, ArtifactRecord)
+                self._unlink_if_exists(Path(artifact.storage_path))
+            self._unlink_if_exists(artifact_json)
+
+        for report_id in report_ids:
+            self._unlink_if_exists(self.report_json_path(report_id))
+            self._unlink_if_exists(self.report_markdown_path(report_id))
+            self._unlink_if_exists(self.report_pdf_path(report_id))
+
+        for approval_id in approval_ids:
+            self._unlink_if_exists(self.approval_path(approval_id))
+
+        shutil.rmtree(self.session_dir(session_id), ignore_errors=True)
+
+    def create_turn(
         self,
         session_id: str,
         profile_name: str,
         task: str,
         scope: Scope,
         budget,
+        auto_approve: bool = False,
         trigger_message_id: str | None = None,
-    ) -> RunRecord:
+    ) -> TurnRecord:
         now = utc_now()
-        run = RunRecord(
-            run_id=new_id("run"),
+        turn = TurnRecord(
+            turn_id=new_id("turn"),
             session_id=session_id,
             root_agent_id=profile_name,
             profile_name=profile_name,
             status="created",
+            auto_approve=auto_approve,
             user_task=task,
             scope=scope,
             budget=budget,
@@ -226,35 +299,35 @@ class FileStorage:
             created_at=now,
             updated_at=now,
         )
-        self.save_run(run)
+        self.save_turn(turn)
         session = self.load_session(session_id)
-        session.run_ids.append(run.run_id)
+        session.turn_ids.append(turn.turn_id)
         session.updated_at = now
         self.save_session(session)
-        return run
+        return turn
 
-    def save_run(self, run: RunRecord) -> None:
-        run.updated_at = utc_now()
-        self._write_json(self.run_json_path(run.session_id, run.run_id), run)
+    def save_turn(self, turn: TurnRecord) -> None:
+        turn.updated_at = utc_now()
+        self._write_json(self.turn_json_path(turn.session_id, turn.turn_id), turn)
 
-    def load_run(self, session_id: str, run_id: str) -> RunRecord:
-        return self._read_json(self.run_json_path(session_id, run_id), RunRecord)
+    def load_turn(self, session_id: str, turn_id: str) -> TurnRecord:
+        return self._read_json(self.turn_json_path(session_id, turn_id), TurnRecord)
 
-    def list_runs(self, session_id: str) -> list[RunRecord]:
-        runs_dir = self.session_dir(session_id) / "runs"
-        runs: list[RunRecord] = []
-        if not runs_dir.exists():
-            return runs
-        for path in sorted(runs_dir.glob("*.json")):
-            if path.name.endswith(".audit.ndjson"):
+    def list_turns(self, session_id: str) -> list[TurnRecord]:
+        turns_dir = self.session_dir(session_id) / "turns"
+        turns: list[TurnRecord] = []
+        if not turns_dir.exists():
+            return turns
+        for path in sorted(turns_dir.glob("*.json")):
+            if path.name.endswith(".events.ndjson"):
                 continue
-            runs.append(self._read_json(path, RunRecord))
-        return sorted(runs, key=lambda item: item.created_at, reverse=True)
+            turns.append(self._read_json(path, TurnRecord))
+        return sorted(turns, key=lambda item: item.created_at, reverse=True)
 
-    def find_run(self, run_id: str) -> RunRecord:
-        for path in self.root.glob(f"sessions/*/runs/{run_id}.json"):
-            return self._read_json(path, RunRecord)
-        raise FileNotFoundError(run_id)
+    def find_turn(self, turn_id: str) -> TurnRecord:
+        for path in self.root.glob(f"sessions/*/turns/{turn_id}.json"):
+            return self._read_json(path, TurnRecord)
+        raise FileNotFoundError(turn_id)
 
     def save_evidence(self, evidence: EvidenceRecord) -> None:
         self._write_json(self.evidence_path(evidence.evidence_id), evidence)
@@ -298,7 +371,7 @@ class FileStorage:
         with path.open("a", encoding="utf-8") as handle:
             handle.write(f"## {note.heading}\n\n")
             handle.write(f"source_session_id: {note.source_session_id}\n")
-            handle.write(f"source_run_id: {note.source_run_id}\n\n")
+            handle.write(f"source_turn_id: {note.source_turn_id}\n\n")
             handle.write(note.body.strip() + "\n\n")
             if note.evidence_refs:
                 handle.write("Evidence: " + ", ".join(f"`{ref}`" for ref in note.evidence_refs) + "\n\n")
@@ -336,18 +409,36 @@ class FileStorage:
     def load_approval(self, approval_id: str) -> ApprovalRecord:
         return self._read_json(self.approval_path(approval_id), ApprovalRecord)
 
+    def list_approvals(self, *, turn_id: str | None = None, status: str | None = None) -> list[ApprovalRecord]:
+        approvals_dir = self.root / "sessions" / "_approvals"
+        approvals: list[ApprovalRecord] = []
+        if not approvals_dir.exists():
+            return approvals
+        for path in sorted(approvals_dir.glob("*.json")):
+            try:
+                approval = self._read_json(path, ApprovalRecord)
+            except ValidationError as exc:
+                logger.warning("Skipping invalid approval record at %s: %s", path, exc)
+                continue
+            if turn_id and approval.turn_id != turn_id:
+                continue
+            if status and approval.status != status:
+                continue
+            approvals.append(approval)
+        return sorted(approvals, key=lambda item: item.requested_at, reverse=True)
+
     def save_artifact(
         self,
         *,
         session_id: str,
-        run_id: str,
+        turn_id: str,
         kind: str,
         content: str | bytes,
         mime_type: str = "text/plain",
         suffix: str = ".txt",
     ) -> ArtifactRecord:
         artifact_id = new_id("art")
-        blob_path = self.artifact_blob_path(run_id, artifact_id, suffix)
+        blob_path = self.artifact_blob_path(turn_id, artifact_id, suffix)
         ensure_parent(blob_path)
         raw = content.encode("utf-8") if isinstance(content, str) else content
         blob_path.write_bytes(raw)
@@ -356,7 +447,7 @@ class FileStorage:
             artifact_id=artifact_id,
             kind=kind,
             session_id=session_id,
-            run_id=run_id,
+            turn_id=turn_id,
             storage_path=str(blob_path),
             mime_type=mime_type,
             size_bytes=len(raw),
@@ -373,14 +464,30 @@ class FileStorage:
         artifact = self.load_artifact(artifact_id)
         return Path(artifact.storage_path).read_bytes()
 
-    def append_audit(self, session_id: str, event: AuditEvent) -> None:
-        self._append_ndjson(self.audit_path(session_id, event.run_id), event)
+    def append_turn_event(self, session_id: str, event: TurnEvent) -> None:
+        self._append_ndjson(self.turn_events_path(session_id, event.turn_id or "session"), event)
 
-    def load_audit_events(self, session_id: str, run_id: str) -> list[dict[str, Any]]:
-        path = self.audit_path(session_id, run_id)
+    def load_turn_events(self, session_id: str, turn_id: str) -> list[dict[str, Any]]:
+        path = self.turn_events_path(session_id, turn_id)
         if not path.exists():
             return []
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    def append_audit(self, session_id: str, event: AuditEvent) -> None:
+        self.append_turn_event(
+            session_id,
+            TurnEvent(
+                event_id=event.event_id,
+                session_id=session_id,
+                turn_id=event.turn_id,
+                type="audit",
+                data=event.model_dump(mode="json"),
+                created_at=event.timestamp,
+            ),
+        )
+
+    def load_audit_events(self, session_id: str, turn_id: str) -> list[dict[str, Any]]:
+        return self.load_turn_events(session_id, turn_id)
 
     def save_report(self, report: ReportRecord, markdown: str, pdf_bytes: bytes | None = None) -> None:
         self._write_json(self.report_json_path(report.report_id), report)

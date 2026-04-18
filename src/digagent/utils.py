@@ -38,10 +38,13 @@ def action_digest(payload: dict[str, Any]) -> str:
     return f"sha256:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
 
 
-def expand_env_text(text: str) -> str:
+def expand_env_text(text: str, values: dict[str, Any] | None = None) -> str:
+    resolved_values = values or {}
+
     def replacer(match: re.Match[str]) -> str:
         key = match.group(1)
+        if key in resolved_values and resolved_values[key] is not None:
+            return str(resolved_values[key])
         return os.environ.get(key, match.group(0))
 
     return re.sub(r"\$\{([A-Z0-9_]+)\}", replacer, text)
-

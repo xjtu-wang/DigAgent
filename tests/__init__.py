@@ -1,1 +1,1 @@
-# Test package for DigAgent.
+"""Test package for DigAgent."""

@@ -15,7 +15,7 @@ class DigAgentModel(BaseModel):
 
 class SessionStatus(StrEnum):
     IDLE = "idle"
-    ACTIVE_RUN = "active_run"
+    ACTIVE_TURN = "active_turn"
     AWAITING_APPROVAL = "awaiting_approval"
     AWAITING_USER_INPUT = "awaiting_user_input"
     ARCHIVED = "archived"
@@ -23,8 +23,8 @@ class SessionStatus(StrEnum):
 
 class UserTurnDisposition(StrEnum):
     DIRECT_ANSWER = "direct_answer"
-    CREATE_RUN = "create_run"
-    CONTINUE_RUN = "continue_run"
+    CREATE_TURN = "create_turn"
+    CONTINUE_TURN = "continue_turn"
     REJECT = "reject"
 
 
@@ -33,10 +33,10 @@ class MessageRoute(StrEnum):
     CLARIFICATION_INPUT = "clarification_input"
     APPROVAL_RESPONSE = "approval_response"
     CANCEL = "cancel"
-    NEW_RUN_REQUEST = "new_run_request"
+    NEW_TURN_REQUEST = "new_turn_request"
 
 
-class RunStatus(StrEnum):
+class TurnStatus(StrEnum):
     CREATED = "created"
     PLANNING = "planning"
     AWAITING_APPROVAL = "awaiting_approval"
@@ -47,6 +47,7 @@ class RunStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    SUPERSEDED = "superseded"
     TIMED_OUT = "timed_out"
 
 
@@ -75,6 +76,7 @@ class TaskNodeStatus(StrEnum):
 class GraphOpType(StrEnum):
     ADD_NODE = "ADD_NODE"
     UPDATE_NODE = "UPDATE_NODE"
+    UPDATE_GRAPH = "UPDATE_GRAPH"
     ADD_EDGE = "ADD_EDGE"
     REMOVE_EDGE = "REMOVE_EDGE"
     DEPRECATE_NODE = "DEPRECATE_NODE"
@@ -92,9 +94,17 @@ class ApprovalStatus(StrEnum):
     APPROVED = "approved"
     REJECTED = "rejected"
     EXPIRED = "expired"
+    SUPERSEDED = "superseded"
 
 
 class PermissionDecision(StrEnum):
+    ALLOW = "allow"
+    CONFIRM = "confirm"
+    DENY = "deny"
+
+
+class PermissionRule(StrEnum):
+    INHERIT = "inherit"
     ALLOW = "allow"
     CONFIRM = "confirm"
     DENY = "deny"
@@ -105,6 +115,11 @@ class MessageRole(StrEnum):
     ASSISTANT = "assistant"
     SYSTEM = "system"
     TOOL = "tool"
+
+
+class GraphPlanningState(StrEnum):
+    OPEN = "open"
+    COMPLETE = "complete"
 
 
 class Scope(DigAgentModel):
@@ -127,16 +142,73 @@ class BudgetUsage(DigAgentModel):
     active_tools: int = 0
 
 
+class SessionPermissionOverrides(DigAgentModel):
+    tool_rules: dict[str, PermissionRule] = Field(default_factory=dict)
+    mcp_server_rules: dict[str, PermissionRule] = Field(default_factory=dict)
+    risk_tag_rules: dict[str, PermissionRule] = Field(default_factory=dict)
+    auto_approve: bool = False
+    budget_override: RuntimeBudget | None = None
+
+    def is_empty(self) -> bool:
+        return (
+            not self.tool_rules
+            and not self.mcp_server_rules
+            and not self.risk_tag_rules
+            and not self.auto_approve
+            and self.budget_override is None
+        )
+
+
+CONFIDENCE_ALIASES = {
+    "very_low": 0.2,
+    "low": 0.4,
+    "medium": 0.65,
+    "high": 0.85,
+    "very_high": 0.95,
+}
+
+
 class IntentProfile(DigAgentModel):
     objective: str
     labels: list[str] = Field(default_factory=list)
     report_kind_hint: str | None = None
     confidence: float = 0.75
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        confidence = payload.get("confidence")
+        if isinstance(confidence, str):
+            normalized = confidence.strip().lower().replace(" ", "_")
+            if normalized in CONFIDENCE_ALIASES:
+                payload["confidence"] = CONFIDENCE_ALIASES[normalized]
+            else:
+                try:
+                    payload["confidence"] = float(confidence)
+                except ValueError:
+                    pass
+        return payload
+
 
 class TaskEdge(DigAgentModel):
     source: str
     target: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        payload["source"] = payload.get("source") or payload.get("from_node_id") or payload.get("from")
+        payload["target"] = payload.get("target") or payload.get("to_node_id") or payload.get("to")
+        payload.pop("from_node_id", None)
+        payload.pop("to_node_id", None)
+        payload.pop("type", None)
+        return payload
 
 
 class GraphEditOp(DigAgentModel):
@@ -146,6 +218,23 @@ class GraphEditOp(DigAgentModel):
     edge: TaskEdge | None = None
     patch: dict[str, Any] = Field(default_factory=dict)
     reason: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        payload["op_type"] = payload.get("op_type") or payload.get("type")
+        if payload.get("edge") is None:
+            edge_keys = {"source", "target", "from_node_id", "to_node_id", "from", "to"}
+            if edge_keys & payload.keys():
+                payload["edge"] = {
+                    key: payload.pop(key)
+                    for key in list(edge_keys | {"type"})
+                    if key in payload
+                }
+        return payload
 
 
 class TaskNode(DigAgentModel):
@@ -174,6 +263,56 @@ class TaskNode(DigAgentModel):
     command_name: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     is_active: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        metadata = dict(payload.get("metadata") or {})
+        if payload.get("kind") in {TaskNodeKind.SUBAGENT, TaskNodeKind.SUBAGENT.value}:
+            payload["owner_profile_name"] = payload.get("owner_profile_name") or metadata.get("owner_profile_name")
+        payload["metadata"] = _normalize_legacy_tool_metadata(payload.get("kind"), metadata)
+        if payload.get("kind") in {TaskNodeKind.SUBAGENT, TaskNodeKind.SUBAGENT.value} and not payload.get("owner_profile_name"):
+            alias = (
+                metadata.get("owner_profile_name")
+                or metadata.get("profile_name")
+                or metadata.get("profile")
+            )
+            if alias:
+                payload["owner_profile_name"] = str(alias)
+        return payload
+
+
+LEGACY_TOOL_ARGUMENT_ALIASES = {
+    "web_search": {
+        "max_results": "limit",
+    },
+    "vuln_kb_lookup": {
+        "keyword": "query",
+    },
+}
+
+
+def _normalize_legacy_tool_metadata(kind: Any, metadata: dict[str, Any]) -> dict[str, Any]:
+    if kind not in {TaskNodeKind.TOOL, TaskNodeKind.TOOL.value}:
+        return metadata
+    if metadata.get("tool_name") or not metadata.get("tool"):
+        return metadata
+    tool_name = str(metadata.get("tool") or "").strip()
+    if not tool_name:
+        return metadata
+    aliases = LEGACY_TOOL_ARGUMENT_ALIASES.get(tool_name, {})
+    arguments = dict(metadata.get("arguments") or {})
+    for key, value in metadata.items():
+        if key in {"tool", "tool_name", "arguments"}:
+            continue
+        arguments.setdefault(aliases.get(key, key), value)
+    normalized = dict(metadata)
+    normalized["tool_name"] = tool_name
+    normalized["arguments"] = arguments
+    return normalized
 
 
 def _normalize_graph_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -232,13 +371,15 @@ def _normalize_graph_payload(payload: dict[str, Any]) -> dict[str, Any]:
     graph["completed_node_ids"] = completed_node_ids
     graph["blocked_node_ids"] = blocked_node_ids
     graph["deprecated_node_ids"] = deprecated_node_ids
+    graph.setdefault("planning_state", GraphPlanningState.COMPLETE.value)
     graph.setdefault("graph_version", 1)
     graph.setdefault("applied_ops", [])
     return graph
 
 
 class TaskGraph(DigAgentModel):
-    run_id: str
+    turn_id: str
+    planning_state: GraphPlanningState = GraphPlanningState.COMPLETE
     graph_version: int = 1
     nodes: list[TaskNode] = Field(default_factory=list)
     edges: list[TaskEdge] = Field(default_factory=list)
@@ -282,7 +423,7 @@ class ActionTargets(DigAgentModel):
 
 class ActionRequest(DigAgentModel):
     action_id: str
-    run_id: str
+    turn_id: str
     actor_agent_id: str
     action_type: ActionType
     name: str
@@ -298,7 +439,7 @@ class ActionRequest(DigAgentModel):
 class DelegationGrant(DigAgentModel):
     grant_id: str
     parent_action_id: str
-    run_id: str
+    turn_id: str
     node_id: str
     delegator_profile_name: str
     delegatee_profile_name: str
@@ -336,9 +477,13 @@ class ApprovalChallenge(DigAgentModel):
 class ApprovalRecord(DigAgentModel):
     approval_id: str
     action_id: str
-    run_id: str
+    turn_id: str
     status: ApprovalStatus
     action_digest: str
+    policy_key: str | None = None
+    kind: str = "primary"
+    parent_approval_id: str | None = None
+    superseded_by: str | None = None
     requested_by: str
     requested_at: str
     resolved_at: str | None = None
@@ -353,7 +498,7 @@ class ApprovalRecord(DigAgentModel):
 class AuditEvent(DigAgentModel):
     event_id: str
     timestamp: str
-    run_id: str
+    turn_id: str
     action_id: str
     actor_agent_id: str
     decision: PermissionDecision
@@ -369,7 +514,7 @@ class AuditEvent(DigAgentModel):
 class MessageRecord(DigAgentModel):
     message_id: str
     session_id: str
-    run_id: str | None = None
+    turn_id: str | None = None
     role: MessageRole
     sender: str
     content: str
@@ -379,7 +524,7 @@ class MessageRecord(DigAgentModel):
 
 
 class SessionRecord(DigAgentModel):
-    schema_version: str = "1.0"
+    schema_version: str = "2.0"
     session_id: str
     title: str
     created_at: str
@@ -388,8 +533,9 @@ class SessionRecord(DigAgentModel):
     root_agent_profile: str
     intent_profile: IntentProfile | None = None
     scope: Scope = Field(default_factory=Scope)
-    run_ids: list[str] = Field(default_factory=list)
-    active_run_id: str | None = None
+    permission_overrides: SessionPermissionOverrides = Field(default_factory=SessionPermissionOverrides)
+    turn_ids: list[str] = Field(default_factory=list)
+    active_turn_id: str | None = None
     pending_approval_ids: list[str] = Field(default_factory=list)
     pending_user_question: str | None = None
     conversation_summary: str | None = None
@@ -409,7 +555,7 @@ class SessionSummary(DigAgentModel):
     title: str
     status: SessionStatus
     updated_at: str
-    active_run_id: str | None = None
+    active_turn_id: str | None = None
     pending_approval_count: int = 0
     last_message_preview: str | None = None
     latest_report_id: str | None = None
@@ -419,7 +565,7 @@ class ArtifactRecord(DigAgentModel):
     artifact_id: str
     kind: str
     session_id: str
-    run_id: str
+    turn_id: str
     storage_path: str
     mime_type: str
     size_bytes: int
@@ -430,7 +576,7 @@ class ArtifactRecord(DigAgentModel):
 class EvidenceRecord(DigAgentModel):
     evidence_id: str
     session_id: str
-    run_id: str
+    turn_id: str
     type: str
     title: str
     summary: str
@@ -450,7 +596,7 @@ class MemoryRecord(DigAgentModel):
     summary: str
     content: dict[str, Any]
     source_session_id: str
-    source_run_id: str
+    source_turn_id: str
     source_evidence_ids: list[str] = Field(default_factory=list)
     confidence: float = 0.75
     sensitivity: str = "low"
@@ -472,7 +618,7 @@ class DailyMemoryNote(DigAgentModel):
     heading: str
     body: str
     source_session_id: str
-    source_run_id: str
+    source_turn_id: str
     evidence_refs: list[str] = Field(default_factory=list)
     created_at: str
 
@@ -488,7 +634,7 @@ class WikiEntry(DigAgentModel):
     title: str
     summary: str
     source_session_id: str
-    source_run_id: str
+    source_turn_id: str
     claims: list[WikiClaim] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     created_at: str
@@ -509,7 +655,7 @@ class Finding(DigAgentModel):
 class ReportRecord(DigAgentModel):
     report_id: str
     session_id: str
-    run_id: str
+    turn_id: str
     kind: str
     title: str
     scope: dict[str, Any]
@@ -554,6 +700,7 @@ class AgentProfile(DigAgentModel):
     model: str | None = None
     system_prompt: str
     tool_allowlist: list[str] = Field(default_factory=list)
+    mcp_server_allowlist: list[str] = Field(default_factory=list)
     network_scope: list[str] = Field(default_factory=list)
     filesystem_scope: list[str] = Field(default_factory=list)
     runtime_budget: RuntimeBudget = Field(default_factory=RuntimeBudget)
@@ -613,7 +760,7 @@ class SkillManifest(DigAgentModel):
 
 class SubagentTask(DigAgentModel):
     task_id: str
-    run_id: str
+    turn_id: str
     node_id: str
     goal: str
     grant_id: str | None = None
@@ -626,7 +773,7 @@ class SubagentTask(DigAgentModel):
 class MemorySearchQuery(DigAgentModel):
     query: str
     session_id: str | None = None
-    run_id: str | None = None
+    turn_id: str | None = None
     scope: str = "session"
     sensitivity: str = "normal"
     limit: int = 5
@@ -641,7 +788,7 @@ class MemoryHit(DigAgentModel):
     score: float
     sensitivity: str = "low"
     source_session_id: str | None = None
-    source_run_id: str | None = None
+    source_turn_id: str | None = None
     updated_at: str | None = None
 
 
@@ -672,13 +819,14 @@ class CveSyncState(DigAgentModel):
     running: bool = False
 
 
-class RunRecord(DigAgentModel):
-    schema_version: str = "1.0"
-    run_id: str
+class TurnRecord(DigAgentModel):
+    schema_version: str = "2.0"
+    turn_id: str
     session_id: str
     root_agent_id: str = "sisyphus"
     profile_name: str
-    status: RunStatus
+    status: TurnStatus
+    auto_approve: bool = False
     intent_profile: IntentProfile | None = None
     user_task: str
     scope: Scope = Field(default_factory=Scope)
@@ -706,10 +854,10 @@ class RunRecord(DigAgentModel):
     finished_at: str | None = None
 
 
-class RunEvent(DigAgentModel):
+class TurnEvent(DigAgentModel):
     event_id: str
     session_id: str
-    run_id: str | None = None
+    turn_id: str | None = None
     type: str
     data: dict[str, Any]
     created_at: str
@@ -729,7 +877,7 @@ class SubagentResult(DigAgentModel):
 class UserTurnResult(DigAgentModel):
     disposition: UserTurnDisposition
     session_id: str
-    run_id: str | None = None
+    turn_id: str | None = None
     message_id: str | None = None
     assistant_message: str | None = None
     approval_ids: list[str] = Field(default_factory=list)

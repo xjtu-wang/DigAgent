@@ -14,6 +14,7 @@ dependencies = [
   "deepagents>=0.4.12",
   "langchain>=1.2.15",
   "langgraph>=1.1.6",
+  "langgraph-checkpoint-sqlite>=3.0.3",
   "langchain-openai>=1.0.0",
   "pydantic>=2.11.0",
   "pydantic-settings>=2.10.0",
@@ -44,4 +45,3 @@ packages = ["src/digagent"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-
