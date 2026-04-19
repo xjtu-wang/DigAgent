@@ -9,8 +9,8 @@ from digagent.deepagents_runtime.mcp import list_mcp_server_names
 from digagent.deepagents_runtime.memory import memory_source_paths
 from digagent.deepagents_runtime.skills import skill_source_paths
 from digagent.deepagents_runtime.state import SessionRuntimeHandle
-from digagent.deepagents_runtime.turns import POLL_INTERVAL_SEC, load_session_events, load_turn_events
-from digagent.models import ApprovalStatus, MessageRecord, Scope, SessionPermissionOverrides, SessionRecord, TurnEvent, TurnRecord
+from digagent.deepagents_runtime.turns import POLL_INTERVAL_SEC, TERMINAL_TURN_STATUSES, load_session_events, load_turn_events
+from digagent.models import ApprovalStatus, MessageRecord, Scope, SessionPermissionOverrides, SessionRecord, TurnEvent, TurnRecord, TurnStatus
 
 
 class TurnManagerSessionMixin:
@@ -65,31 +65,43 @@ class TurnManagerSessionMixin:
             approvals.append(approval)
         return [self._serialize_pending_approval(item) for item in approvals]
 
-    async def stream_events(self, session_id: str):
-        index = 0
+    async def stream_events(self, session_id: str, *, since_index: int | None = None, event_types: set[str] | None = None):
+        index = self.session_event_count(session_id) if since_index is None else since_index
         while True:
-            events = load_session_events(self.storage, session_id)
+            events = self.load_session_event_history(session_id, event_types=event_types)
             while index < len(events):
                 yield events[index]
                 index += 1
             await asyncio.sleep(POLL_INTERVAL_SEC)
 
-    async def stream_turn_events(self, turn_id: str):
+    async def stream_turn_events(self, turn_id: str, *, since_index: int | None = None):
         turn = self.storage.find_turn(turn_id)
-        index = 0
+        index = self.turn_event_count(turn.turn_id) if since_index is None else since_index
         while True:
-            events = load_turn_events(self.storage, turn.session_id, turn.turn_id)
+            events = self.load_turn_event_history(turn.turn_id)
             while index < len(events):
                 yield events[index]
                 index += 1
+            if index >= len(events) and self.turn_stream_stopped(turn.turn_id):
+                return
             await asyncio.sleep(POLL_INTERVAL_SEC)
+            turn = self.storage.find_turn(turn_id)
 
-    def load_session_event_history(self, session_id: str) -> list[TurnEvent]:
-        return load_session_events(self.storage, session_id)
+    def load_session_event_history(self, session_id: str, *, event_types: set[str] | None = None) -> list[TurnEvent]:
+        return self._filter_events(load_session_events(self.storage, session_id), event_types)
 
     def load_turn_event_history(self, turn_id: str) -> list[TurnEvent]:
         turn = self.storage.find_turn(turn_id)
         return load_turn_events(self.storage, turn.session_id, turn.turn_id)
+
+    def session_event_count(self, session_id: str, *, event_types: set[str] | None = None) -> int:
+        return len(self.load_session_event_history(session_id, event_types=event_types))
+
+    def turn_event_count(self, turn_id: str) -> int:
+        return len(self.load_turn_event_history(turn_id))
+
+    def turn_stream_stopped(self, turn_id: str) -> bool:
+        return self.storage.find_turn(turn_id).status in {TurnStatus.AWAITING_APPROVAL, TurnStatus.AWAITING_USER_INPUT} or self._is_turn_terminal(turn_id)
 
     def update_session_scope(self, *, session_id: str, add: Scope, remove: Scope, replace: Scope | None) -> SessionRecord:
         session = self.storage.load_session(session_id)
@@ -180,3 +192,11 @@ class TurnManagerSessionMixin:
 
     def _thread_config(self, session_id: str) -> dict[str, Any]:
         return {"configurable": {"thread_id": session_id}}
+
+    def _filter_events(self, events: list[TurnEvent], event_types: set[str] | None) -> list[TurnEvent]:
+        if not event_types:
+            return events
+        return [event for event in events if event.type in event_types]
+
+    def _is_turn_terminal(self, turn_id: str) -> bool:
+        return self.storage.find_turn(turn_id).status in TERMINAL_TURN_STATUSES

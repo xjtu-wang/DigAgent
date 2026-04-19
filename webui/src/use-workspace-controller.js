@@ -25,6 +25,15 @@ const SESSION_REFRESH_EVENT_TYPES = new Set([
   "turn_updated",
   "turn_recorded",
 ]);
+const PRIMARY_TIMELINE_EVENT_TYPES = [
+  "approval_required",
+  "approval_expired",
+  "approval_superseded",
+  "approval_resolved",
+  "failed",
+  "timed_out",
+  "cancelled",
+];
 
 async function readJson(response) {
   const payload = await response.json().catch(() => ({}));
@@ -100,6 +109,176 @@ export function selectActiveTurn(turns, activeTurnId) {
   return turns.find((item) => item.turn_id === activeTurnId) || null;
 }
 
+function createAbortError(message = "hydrate superseded") {
+  try {
+    return new DOMException(message, "AbortError");
+  } catch {
+    const error = new Error(message);
+    error.name = "AbortError";
+    return error;
+  }
+}
+
+function isAbortError(error) {
+  return error?.name === "AbortError";
+}
+
+function eventCursor(event) {
+  if (event?.event_id) {
+    return event.event_id;
+  }
+  if (!event) {
+    return null;
+  }
+  return [event.created_at || "", event.turn_id || "", event.type || ""].join(":");
+}
+
+function mergeUniqueEvents(current, incoming) {
+  const items = Array.isArray(current) ? current : [];
+  const nextItems = Array.isArray(incoming) ? incoming : [incoming];
+  const seen = new Set(items.map((item) => eventCursor(item)));
+  const merged = [...items];
+  for (const item of nextItems) {
+    const cursor = eventCursor(item);
+    if (!cursor || seen.has(cursor)) {
+      continue;
+    }
+    seen.add(cursor);
+    merged.push(item);
+  }
+  return merged;
+}
+
+function combineLoadedEvents(sessionEvents, turnDetailsById) {
+  let merged = mergeUniqueEvents([], sessionEvents);
+  for (const detail of Object.values(turnDetailsById || {})) {
+    if (!detail?.events?.length) {
+      continue;
+    }
+    merged = mergeUniqueEvents(merged, detail.events);
+  }
+  return merged;
+}
+
+function sessionHistoryUrl(sessionId) {
+  const types = encodeURIComponent(PRIMARY_TIMELINE_EVENT_TYPES.join(","));
+  return `/api/sessions/${sessionId}/events?history_only=true&event_types=${types}`;
+}
+
+function createDeferred(sessionId) {
+  let resolve;
+  let reject;
+  const promise = new Promise((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { sessionId, promise, resolve, reject };
+}
+
+export function createTailEventGate(initialCursor = null) {
+  let tailCursor = initialCursor;
+  let replaying = Boolean(initialCursor);
+  return {
+    reset(nextCursor = null) {
+      tailCursor = nextCursor;
+      replaying = Boolean(nextCursor);
+    },
+    shouldProcess(event) {
+      if (!replaying) {
+        return true;
+      }
+      if (eventCursor(event) === tailCursor) {
+        replaying = false;
+      }
+      return false;
+    },
+  };
+}
+
+export function resolveHydrateTarget(sessionList, options = {}) {
+  const { currentSessionId = null, forceHydrate = false, intendedSessionId = null, preferredId = null } = options;
+  if (!sessionList.length || (!forceHydrate && currentSessionId)) {
+    return null;
+  }
+  if (preferredId) {
+    return sessionList.some((item) => item.session_id === preferredId) ? preferredId : null;
+  }
+  if (intendedSessionId) {
+    return sessionList.some((item) => item.session_id === intendedSessionId) ? intendedSessionId : null;
+  }
+  if (currentSessionId) {
+    return sessionList.some((item) => item.session_id === currentSessionId) ? currentSessionId : null;
+  }
+  return forceHydrate ? sessionList[0]?.session_id || null : null;
+}
+
+function rejectDeferred(deferred, message = "hydrate superseded") {
+  if (deferred) {
+    deferred.reject(createAbortError(message));
+  }
+}
+
+export function createHydrationController(runHydrate) {
+  let activeRequest = null;
+  let epoch = 0;
+  let queuedRequest = null;
+
+  function start(sessionId) {
+    const controller = new AbortController();
+    const request = {
+      controller,
+      epoch: epoch + 1,
+      isCurrent: () => activeRequest === request && epoch === request.epoch && !controller.signal.aborted,
+      sessionId,
+      signal: controller.signal,
+    };
+    epoch = request.epoch;
+    activeRequest = request;
+    return runHydrate(sessionId, request).finally(() => {
+      if (activeRequest === request) {
+        activeRequest = null;
+      }
+      if (!queuedRequest || queuedRequest.sessionId !== sessionId || controller.signal.aborted) {
+        return;
+      }
+      const next = queuedRequest;
+      queuedRequest = null;
+      void start(next.sessionId).then(next.resolve, next.reject);
+    });
+  }
+
+  return {
+    cancel(sessionId = null) {
+      if (activeRequest && (!sessionId || activeRequest.sessionId === sessionId)) {
+        activeRequest.controller.abort();
+      }
+      if (queuedRequest && (!sessionId || queuedRequest.sessionId === sessionId)) {
+        const next = queuedRequest;
+        queuedRequest = null;
+        rejectDeferred(next);
+      }
+    },
+    request(sessionId) {
+      if (!sessionId) {
+        return Promise.resolve(null);
+      }
+      if (activeRequest?.sessionId === sessionId) {
+        if (!queuedRequest) {
+          queuedRequest = createDeferred(sessionId);
+        }
+        return queuedRequest.promise;
+      }
+      if (queuedRequest) {
+        const next = queuedRequest;
+        queuedRequest = null;
+        rejectDeferred(next);
+      }
+      activeRequest?.controller.abort();
+      return start(sessionId);
+    },
+  };
+}
+
 export function useWorkspaceController(appSettings) {
   const [sessions, setSessions] = useState([]);
   const [sessionSearch, setSessionSearch] = useState("");
@@ -107,7 +286,8 @@ export function useWorkspaceController(appSettings) {
   const [turns, setTurns] = useState([]);
   const [focusedTurnId, setFocusedTurnId] = useState(null);
   const [messages, setMessages] = useState([]);
-  const [events, setEvents] = useState([]);
+  const [sessionEvents, setSessionEvents] = useState([]);
+  const [turnDetailsById, setTurnDetailsById] = useState({});
   const [planGraphOverride, setPlanGraphOverride] = useState(null);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [task, setTask] = useState("");
@@ -124,12 +304,22 @@ export function useWorkspaceController(appSettings) {
   const [permissionOverrides, setPermissionOverrides] = useState(() => emptyOverrides());
   const [requestPending, setRequestPending] = useState(false);
   const eventSourceRef = useRef(null);
+  const currentSessionIdRef = useRef(null);
+  const eventCursorRef = useRef(null);
+  const hydrateControllerRef = useRef(null);
+  const hydrateExecutorRef = useRef(null);
+  const reportsByIdRef = useRef(reportsById);
+  const sessionIntentRef = useRef(null);
+  const turnDetailsByIdRef = useRef(turnDetailsById);
+  const currentTurnIdRef = useRef(null);
 
   const activeTurn = useMemo(() => selectActiveTurn(turns, session?.active_turn_id), [session?.active_turn_id, turns]);
   const currentTurn = useMemo(() => selectCurrentTurn(turns, focusedTurnId, session?.active_turn_id), [focusedTurnId, session?.active_turn_id, turns]);
+  const currentTurnEvents = useMemo(() => currentTurn?.turn_id ? turnDetailsById[currentTurn.turn_id]?.events || [] : [], [currentTurn?.turn_id, turnDetailsById]);
+  const events = useMemo(() => combineLoadedEvents(sessionEvents, turnDetailsById), [sessionEvents, turnDetailsById]);
   const running = requestPending || Boolean(activeTurn && !TERMINAL_TURN_STATUSES.has(activeTurn.status));
   const primaryTimeline = useMemo(() => buildPrimaryTimeline(messages, events, turns, appSettings.chatPreferences.showKeySystemCards), [appSettings.chatPreferences.showKeySystemCards, events, messages, turns]);
-  const activityEvents = useMemo(() => filterActivityEvents(buildInspectorActivityEvents(events, turns, messages, currentTurn?.turn_id)), [currentTurn?.turn_id, events, turns, messages]);
+  const activityEvents = useMemo(() => filterActivityEvents(buildInspectorActivityEvents(currentTurnEvents, turns, messages, currentTurn?.turn_id)), [currentTurn?.turn_id, currentTurnEvents, turns, messages]);
   const filteredSessions = useMemo(() => {
     const keyword = sessionSearch.trim().toLowerCase();
     return keyword ? sessions.filter((item) => `${item.title || ""} ${item.last_message_preview || ""}`.toLowerCase().includes(keyword)) : sessions;
@@ -143,8 +333,11 @@ export function useWorkspaceController(appSettings) {
     if (planGraphOverride?.turn_id === currentTurn?.turn_id) {
       return planGraphOverride;
     }
+    if (currentTurn?.turn_id && turnDetailsById[currentTurn.turn_id]?.graph) {
+      return turnDetailsById[currentTurn.turn_id].graph;
+    }
     return buildInspectorGraph(currentTurn, messages);
-  }, [currentTurn, messages, planGraphOverride]);
+  }, [currentTurn, messages, planGraphOverride, turnDetailsById]);
   const selectedGraphNode = useMemo(() => planGraph?.nodes?.find((node) => node.node_id === selectedNodeId) || planGraph?.nodes?.find((node) => node.is_active) || planGraph?.nodes?.[0] || null, [planGraph, selectedNodeId]);
   const pendingApprovals = activeTurn?.pending_approvals || [];
   const canDeleteCurrentSession = Boolean(session?.session_id) && !session?.active_turn_id;
@@ -155,28 +348,53 @@ export function useWorkspaceController(appSettings) {
   }, [appSettings]);
 
   useEffect(() => {
+    currentSessionIdRef.current = session?.session_id || null;
+  }, [session?.session_id]);
+
+  useEffect(() => {
+    turnDetailsByIdRef.current = turnDetailsById;
+  }, [turnDetailsById]);
+
+  useEffect(() => {
+    currentTurnIdRef.current = currentTurn?.turn_id || null;
+  }, [currentTurn?.turn_id]);
+
+  useEffect(() => {
+    reportsByIdRef.current = reportsById;
+  }, [reportsById]);
+
+  useEffect(() => {
     if (planGraph?.nodes?.length && !planGraph.nodes.some((node) => node.node_id === selectedNodeId)) {
       const activeNode = planGraph.nodes.find((node) => node.is_active) || planGraph.nodes[0];
       setSelectedNodeId(activeNode?.node_id || null);
     }
   }, [planGraph, selectedNodeId]);
 
-  async function loadReport(reportId) {
-    if (!reportId || reportsById[reportId]) {
-      return reportsById[reportId];
+  async function loadReport(reportId, signal = undefined) {
+    if (!reportId || reportsByIdRef.current[reportId]) {
+      return reportsByIdRef.current[reportId] || null;
     }
-    const payload = await readJson(await fetch(`/api/reports/${reportId}`));
-    setReportsById((current) => ({ ...current, [reportId]: payload }));
+    const payload = await readJson(await fetch(`/api/reports/${reportId}`, { signal }));
+    if (signal?.aborted) {
+      return null;
+    }
+    setReportsById((current) => current[reportId] ? current : { ...current, [reportId]: payload });
     return payload;
   }
 
   function resetSessionView() {
+    hydrateControllerRef.current?.cancel();
     eventSourceRef.current?.close();
+    eventSourceRef.current = null;
+    currentSessionIdRef.current = null;
+    eventCursorRef.current = null;
+    sessionIntentRef.current = null;
     setSession(null);
     setTurns([]);
     setFocusedTurnId(null);
     setMessages([]);
-    setEvents([]);
+    setSessionEvents([]);
+    setTurnDetailsById({});
     setPlanGraphOverride(null);
     setSelectedNodeId(null);
     setExpandedItems(new Set());
@@ -185,40 +403,75 @@ export function useWorkspaceController(appSettings) {
     setPermissionOverrides(emptyOverrides());
   }
 
-  async function hydrateSession(sessionId) {
+  hydrateExecutorRef.current = async (sessionId, request) => {
     const [sessionResponse, messagesResponse, eventsResponse] = await Promise.all([
-      fetch(`/api/sessions/${sessionId}`),
-      fetch(`/api/sessions/${sessionId}/messages`),
-      fetch(`/api/sessions/${sessionId}/events?history_only=true`),
+      fetch(`/api/sessions/${sessionId}`, { signal: request.signal }),
+      fetch(`/api/sessions/${sessionId}/messages`, { signal: request.signal }),
+      fetch(sessionHistoryUrl(sessionId), { signal: request.signal }),
     ]);
     ensureOk(sessionResponse, "会话加载失败");
     ensureOk(messagesResponse, "消息加载失败");
     ensureOk(eventsResponse, "事件历史加载失败");
     const [sessionPayload, messagePayload, rawEvents] = await Promise.all([sessionResponse.json(), messagesResponse.json(), eventsResponse.text()]);
+    if (!request.isCurrent() || sessionIntentRef.current !== sessionId) {
+      return null;
+    }
     const normalizedTurns = normalizeTurns(sessionPayload.turns || []);
+    const parsedEvents = parseEventHistory(rawEvents);
+    eventCursorRef.current = null;
+    currentSessionIdRef.current = sessionPayload.session_id;
     setSession(sessionPayload);
     setTurns(normalizedTurns);
     setFocusedTurnId((current) => current && normalizedTurns.some((item) => item.turn_id === current) ? current : sessionPayload.active_turn_id || normalizedTurns[0]?.turn_id || null);
     setPermissionOverrides(normalizePermissionOverrides(sessionPayload.permission_overrides));
     setMessages(sortMessages(messagePayload));
-    setEvents(parseEventHistory(rawEvents));
+    setSessionEvents(parsedEvents);
+    setTurnDetailsById({});
     setExpandedItems(new Set());
     setOpenEvidenceIds(new Set());
     setOpenReportIds(new Set());
     const currentReportId = sessionPayload.latest_report_id || sessionPayload.last_report_id || normalizedTurns.find((item) => item.turn_id === sessionPayload.active_turn_id)?.report_id;
     if (currentReportId) {
-      await loadReport(currentReportId);
+      await loadReport(currentReportId, request.signal);
+    }
+    if (!request.isCurrent() || sessionIntentRef.current !== sessionId) {
+      return null;
+    }
+    return { events: parsedEvents, session: sessionPayload };
+  };
+
+  if (!hydrateControllerRef.current) {
+    hydrateControllerRef.current = createHydrationController((sessionId, request) => hydrateExecutorRef.current(sessionId, request));
+  }
+
+  async function hydrateSession(sessionId) {
+    if (!sessionId) {
+      return null;
+    }
+    sessionIntentRef.current = sessionId;
+    try {
+      return await hydrateControllerRef.current.request(sessionId);
+    } catch (error) {
+      if (isAbortError(error)) {
+        return null;
+      }
+      throw error;
     }
   }
 
   async function loadSessions(preferredId = null, forceHydrate = false) {
     const payload = await readJson(await fetch("/api/sessions"));
     setSessions(payload);
-    if ((forceHydrate || !session?.session_id) && payload.length > 0) {
-      const preferred = preferredId && payload.some((item) => item.session_id === preferredId) ? preferredId : payload[0].session_id;
-      await hydrateSession(preferred);
-    } else if (!forceHydrate && session?.session_id) {
-      const current = payload.find((item) => item.session_id === session.session_id);
+    const hydrateTarget = resolveHydrateTarget(payload, {
+      currentSessionId: currentSessionIdRef.current,
+      forceHydrate,
+      intendedSessionId: sessionIntentRef.current,
+      preferredId,
+    });
+    if (hydrateTarget) {
+      await hydrateSession(hydrateTarget);
+    } else if (!forceHydrate && currentSessionIdRef.current) {
+      const current = payload.find((item) => item.session_id === currentSessionIdRef.current);
       if (current) {
         setSession((existing) => ({ ...(existing || {}), ...current }));
       }
@@ -230,33 +483,122 @@ export function useWorkspaceController(appSettings) {
     void loadSessions(null, true);
   }, []);
 
+  useEffect(() => () => hydrateControllerRef.current?.cancel(), []);
+
   useEffect(() => {
     if (!session?.session_id) {
       return undefined;
     }
     eventSourceRef.current?.close();
     const source = new EventSource(`/api/sessions/${session.session_id}/events`);
+    const tailGate = createTailEventGate();
+    source.onopen = () => {
+      tailGate.reset(null);
+    };
     source.onmessage = async (event) => {
       const payload = normalizeTurnEvent(JSON.parse(event.data));
+      if (!tailGate.shouldProcess(payload)) {
+        return;
+      }
+      eventCursorRef.current = eventCursor(payload);
       if (payload.type === "assistant_message") {
         setMessages((current) => commitAssistantMessage(current, payload));
       } else if (payload.type === "session_title_updated") {
         setSession((current) => applySessionTitleUpdate(current, payload));
         setSessions((current) => applySessionSummaryTitleUpdate(current, payload));
-      } else {
-        setEvents((current) => current.some((item) => item.event_id === payload.event_id) ? current : [...current, payload]);
+      }
+      if (PRIMARY_TIMELINE_EVENT_TYPES.includes(payload.type)) {
+        setSessionEvents((current) => mergeUniqueEvents(current, payload));
+      }
+      if (payload.turn_id && (turnDetailsByIdRef.current[payload.turn_id] || currentTurnIdRef.current === payload.turn_id)) {
+        setTurnDetailsById((current) => {
+          const detail = current[payload.turn_id] || { events: [], graph: null };
+          return {
+            ...current,
+            [payload.turn_id]: {
+              ...detail,
+              events: mergeUniqueEvents(detail.events, payload),
+            },
+          };
+        });
       }
       if (payload.type === "task_graph_updated") {
-        setPlanGraphOverride({ ...payload.data, turn_id: payload.turn_id || payload.data?.turn_id || null });
+        const graphPayload = { ...payload.data, turn_id: payload.turn_id || payload.data?.turn_id || null };
+        setPlanGraphOverride(graphPayload);
+        if (graphPayload.turn_id) {
+          setTurnDetailsById((current) => {
+            const detail = current[graphPayload.turn_id] || { events: [], graph: null };
+            return {
+              ...current,
+              [graphPayload.turn_id]: {
+                ...detail,
+                graph: graphPayload,
+              },
+            };
+          });
+        }
       }
       if (payload.type === "cve_sync_updated") setCveStatus(payload.data);
       if (payload.type === "session_permissions_updated") setPermissionOverrides(normalizePermissionOverrides(payload.data));
       if (payload.data?.report_id) await loadReport(payload.data.report_id);
-      if (shouldRefreshSession(payload)) await hydrateSession(session.session_id);
+      if (shouldRefreshSession(payload)) await hydrateSession(payload.session_id || session.session_id);
     };
     eventSourceRef.current = source;
-    return () => source.close();
+    return () => {
+      source.close();
+      if (eventSourceRef.current === source) {
+        eventSourceRef.current = null;
+      }
+    };
   }, [session?.session_id]);
+
+  async function loadTurnDetails(sessionId, turnId, signal = undefined) {
+    if (!sessionId || !turnId) {
+      return null;
+    }
+    const cached = turnDetailsByIdRef.current[turnId];
+    if (cached?.events?.length && cached?.graph) {
+      return cached;
+    }
+    const [eventsResponse, graphResponse] = await Promise.all([
+      fetch(`/api/turns/${turnId}/events?history_only=true`, { signal }),
+      fetch(`/api/turns/${turnId}/graph`, { signal }),
+    ]);
+    ensureOk(eventsResponse, "执行历史加载失败");
+    ensureOk(graphResponse, "Workflow 加载失败");
+    const [rawEvents, graphPayload] = await Promise.all([eventsResponse.text(), graphResponse.json()]);
+    if (signal?.aborted || currentSessionIdRef.current !== sessionId || sessionIntentRef.current !== sessionId) {
+      return null;
+    }
+    const detail = {
+      events: parseEventHistory(rawEvents),
+      graph: graphPayload,
+    };
+    setTurnDetailsById((current) => {
+      const existing = current[turnId] || { events: [], graph: null };
+      return {
+        ...current,
+        [turnId]: {
+          events: mergeUniqueEvents(existing.events, detail.events),
+          graph: detail.graph || existing.graph,
+        },
+      };
+    });
+    return detail;
+  }
+
+  useEffect(() => {
+    if (!session?.session_id || !currentTurn?.turn_id) {
+      return undefined;
+    }
+    const controller = new AbortController();
+    void loadTurnDetails(session.session_id, currentTurn.turn_id, controller.signal).catch((error) => {
+      if (!isAbortError(error)) {
+        console.error(error);
+      }
+    });
+    return () => controller.abort();
+  }, [currentTurn?.turn_id, session?.session_id]);
 
   async function ensureSession(message) {
     if (session?.session_id) {
@@ -280,6 +622,9 @@ export function useWorkspaceController(appSettings) {
       await hydrateSession(sessionId);
       if (!payload.turn) setRequestPending(false);
     } catch (error) {
+      if (isAbortError(error)) {
+        return;
+      }
       setRequestPending(false);
       window.alert(error instanceof Error ? error.message : "消息发送失败");
     } finally {
@@ -295,6 +640,9 @@ export function useWorkspaceController(appSettings) {
       await readJson(await fetch(`/api/approvals/${approvalId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ approved, resolver: "webui" }) }));
       if (session?.session_id) await hydrateSession(session.session_id);
     } catch (error) {
+      if (isAbortError(error)) {
+        return;
+      }
       window.alert(error instanceof Error ? error.message : "审批提交失败");
     } finally {
       setResolvingApprovalIds((current) => {
@@ -364,8 +712,16 @@ export function useWorkspaceController(appSettings) {
     setOpenReportIds((current) => { const next = new Set(current); next.has(reportId) ? next.delete(reportId) : next.add(reportId); return next; });
   }
 
-  function toggleItem(eventId) {
+  function toggleItem(eventId, turnId = null) {
+    const opening = !expandedItems.has(eventId);
     setExpandedItems((current) => { const next = new Set(current); next.has(eventId) ? next.delete(eventId) : next.add(eventId); return next; });
+    if (opening && session?.session_id && turnId) {
+      void loadTurnDetails(session.session_id, turnId).catch((error) => {
+        if (!isAbortError(error)) {
+          console.error(error);
+        }
+      });
+    }
   }
 
   async function syncCve() {

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, AsyncIterator
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -13,6 +14,8 @@ from digagent.config import current_env_summary, get_settings
 from digagent.models import Scope, SessionPermissionOverrides, SessionTitleSource, SessionTitleStatus
 from digagent.runtime import TurnManager
 from digagent.session_titles import DEFAULT_SESSION_TITLE, is_seed_title
+
+SSE_HEARTBEAT_SEC = 5.0
 
 
 class CreateSessionRequest(BaseModel):
@@ -74,22 +77,21 @@ def create_app(manager: TurnManager | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    def serialize_turn(turn):
-        payload = turn.model_dump(mode="json")
+    def serialize_turn(turn, *, include_graph: bool = True):
+        exclude = None if include_graph else {"task_graph"}
+        payload = turn.model_dump(mode="json", exclude=exclude)
         payload["pending_approvals"] = manager.pending_approvals_for_turn(turn.turn_id)
         return payload
 
     def serialize_session_summary(session):
-        messages = manager.list_messages(session.session_id)
-        last_preview = messages[-1].content[:140] if messages else None
         payload = session.model_dump(mode="json")
-        payload["last_message_preview"] = last_preview
+        payload["last_message_preview"] = payload.get("last_message_preview")
         payload["pending_approval_count"] = len(session.pending_approval_ids)
         return payload
 
     def serialize_session(session):
         payload = serialize_session_summary(session)
-        payload["turns"] = [serialize_turn(turn) for turn in manager.list_turns(session.session_id)]
+        payload["turns"] = [serialize_turn(turn, include_graph=False) for turn in manager.list_turns(session.session_id)]
         return payload
 
     def require_supported_session(session_id: str):
@@ -107,8 +109,29 @@ def create_app(manager: TurnManager | None = None) -> FastAPI:
             payload["turn"] = serialize_turn(manager.get_turn(result.turn_id))
         return payload
 
-    async def stream_event_payload(events: AsyncIterator[Any]) -> AsyncIterator[str]:
-        async for event in events:
+    def parse_event_types(raw_value: str | None) -> set[str] | None:
+        if not raw_value:
+            return None
+        event_types = {item.strip() for item in raw_value.split(",") if item.strip()}
+        return event_types or None
+
+    async def stream_event_payload(request: Request, events: AsyncIterator[Any]) -> AsyncIterator[str]:
+        while True:
+            if await request.is_disconnected():
+                return
+            try:
+                event = await asyncio.wait_for(events.__anext__(), timeout=SSE_HEARTBEAT_SEC)
+            except StopAsyncIteration:
+                return
+            except asyncio.TimeoutError:
+                yield ": keep-alive\n\n"
+                continue
+            yield f"data: {json.dumps(event.model_dump(mode='json'), ensure_ascii=False)}\n\n"
+
+    async def stream_history_payload(request: Request, events: list[Any]) -> AsyncIterator[str]:
+        for event in events:
+            if await request.is_disconnected():
+                return
             yield f"data: {json.dumps(event.model_dump(mode='json'), ensure_ascii=False)}\n\n"
 
     @app.get("/api/health")
@@ -183,15 +206,18 @@ def create_app(manager: TurnManager | None = None) -> FastAPI:
         return serialize_turn_result(session, result)
 
     @app.get("/api/sessions/{session_id}/events")
-    async def stream_session_events(session_id: str, history_only: bool = False):
+    async def stream_session_events(session_id: str, request: Request, history_only: bool = False, event_types: str | None = None):
         require_supported_session(session_id)
+        filtered_types = parse_event_types(event_types)
         if history_only:
-            async def history_stream() -> AsyncIterator[str]:
-                for event in manager.load_session_event_history(session_id):
-                    yield f"data: {json.dumps(event.model_dump(mode='json'), ensure_ascii=False)}\n\n"
-
-            return StreamingResponse(history_stream(), media_type="text/event-stream")
-        return StreamingResponse(stream_event_payload(manager.stream_events(session_id)), media_type="text/event-stream")
+            return StreamingResponse(
+                stream_history_payload(request, manager.load_session_event_history(session_id, event_types=filtered_types)),
+                media_type="text/event-stream",
+            )
+        return StreamingResponse(
+            stream_event_payload(request, manager.stream_events(session_id, event_types=filtered_types)),
+            media_type="text/event-stream",
+        )
 
     @app.post("/api/turns")
     async def create_turn(body: CreateTurnRequest):
@@ -230,14 +256,16 @@ def create_app(manager: TurnManager | None = None) -> FastAPI:
         return await manager.get_turn_graph(turn_id)
 
     @app.get("/api/turns/{turn_id}/events")
-    async def stream_turn_events(turn_id: str, history_only: bool = False):
+    async def stream_turn_events(turn_id: str, request: Request, history_only: bool = False):
         if history_only:
-            async def history_stream() -> AsyncIterator[str]:
-                for event in manager.load_turn_event_history(turn_id):
-                    yield f"data: {json.dumps(event.model_dump(mode='json'), ensure_ascii=False)}\n\n"
-
-            return StreamingResponse(history_stream(), media_type="text/event-stream")
-        return StreamingResponse(stream_event_payload(manager.stream_turn_events(turn_id)), media_type="text/event-stream")
+            return StreamingResponse(
+                stream_history_payload(request, manager.load_turn_event_history(turn_id)),
+                media_type="text/event-stream",
+            )
+        return StreamingResponse(
+            stream_event_payload(request, manager.stream_turn_events(turn_id)),
+            media_type="text/event-stream",
+        )
 
     @app.post("/api/approvals/{approval_id}")
     async def resolve_approval(approval_id: str, body: ApprovalRequest):

@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from digagent.models import Scope
+from digagent.models import RuntimeBudget, Scope, TurnEvent
 from tests.runtime_import_stubs import empty_checkpoint
 from tests.runtime_turn_fakes import FakeAgent, fake_runtime_factory, wait_for_turn_count
 
@@ -107,3 +107,46 @@ async def test_approve_resumes_pending_turn(manager, monkeypatch) -> None:
     assert approval.status == "approved"
     assert turn.status == "completed"
     assert any(event.type == "approval_resolved" for event in manager.load_turn_event_history(turn.turn_id))
+
+
+@pytest.mark.asyncio
+async def test_stream_events_defaults_to_tail_only(manager) -> None:
+    session = manager.create_session("tail-only", "sisyphus-default", Scope())
+    turn = manager.storage.create_turn(
+        session_id=session.session_id,
+        profile_name="sisyphus-default",
+        task="tail only",
+        scope=Scope(),
+        budget=RuntimeBudget(),
+    )
+    manager.storage.append_turn_event(
+        session.session_id,
+        TurnEvent(
+            event_id="evt_existing",
+            session_id=session.session_id,
+            turn_id=turn.turn_id,
+            type="turn_started",
+            data={"turn_id": turn.turn_id},
+            created_at="2026-04-19T00:00:00Z",
+        ),
+    )
+    stream = manager.stream_events(session.session_id)
+
+    async def append_new_event() -> None:
+        await asyncio.sleep(0.05)
+        manager.storage.append_turn_event(
+            session.session_id,
+            TurnEvent(
+                event_id="evt_new",
+                session_id=session.session_id,
+                turn_id=turn.turn_id,
+                type="completed",
+                data={"turn_id": turn.turn_id},
+                created_at="2026-04-19T00:00:01Z",
+            ),
+        )
+
+    append_task = asyncio.create_task(append_new_event())
+    event = await asyncio.wait_for(anext(stream), timeout=0.3)
+    await append_task
+    assert event.event_id == "evt_new"

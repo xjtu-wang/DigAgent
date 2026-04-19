@@ -13,6 +13,9 @@ class DigAgentModel(BaseModel):
     }
 
 
+LAST_MESSAGE_PREVIEW_LIMIT = 140
+
+
 class SessionStatus(StrEnum):
     IDLE = "idle"
     ACTIVE_TURN = "active_turn"
@@ -507,6 +510,15 @@ class ApprovalRecord(DigAgentModel):
     challenge_expires_at: str | None = None
     node_id: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_legacy_payload(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        payload = dict(value)
+        payload.pop("run_id", None)
+        return payload
+
 
 class AuditEvent(DigAgentModel):
     event_id: str
@@ -557,6 +569,7 @@ class SessionRecord(DigAgentModel):
     last_intent_type: str | None = None
     last_user_message_id: str | None = None
     last_agent_message_id: str | None = None
+    last_message_preview: str | None = None
     memory_refs: list[str] = Field(default_factory=list)
     evidence_refs: list[str] = Field(default_factory=list)
     report_refs: list[str] = Field(default_factory=list)

@@ -23,6 +23,7 @@ from digagent.models import (
     MessageRecord,
     ReportRecord,
     Scope,
+    LAST_MESSAGE_PREVIEW_LIMIT,
     SessionRecord,
     SessionStatus,
     SessionTitleSource,
@@ -34,6 +35,7 @@ from digagent.utils import ensure_parent, json_dumps, new_id, utc_now
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 logger = logging.getLogger(__name__)
+TAIL_READ_CHUNK_SIZE = 4096
 
 
 class FileStorage:
@@ -84,6 +86,80 @@ class FileStorage:
             path.unlink()
         except FileNotFoundError:
             return
+
+    def _read_last_nonempty_line(self, path: Path) -> str | None:
+        if not path.exists():
+            return None
+        with path.open("rb") as handle:
+            handle.seek(0, 2)
+            position = handle.tell()
+            buffer = b""
+            while position > 0:
+                read_size = min(TAIL_READ_CHUNK_SIZE, position)
+                position -= read_size
+                handle.seek(position)
+                buffer = handle.read(read_size) + buffer
+                stripped = buffer.rstrip(b"\r\n")
+                newline_index = stripped.rfind(b"\n")
+                if newline_index == -1:
+                    continue
+                return stripped[newline_index + 1 :].decode("utf-8")
+            stripped = buffer.rstrip(b"\r\n")
+            return stripped.decode("utf-8") if stripped else None
+
+    def _load_last_message_preview(self, session_id: str) -> str | None:
+        line = self._read_last_nonempty_line(self.session_messages_path(session_id))
+        if line is None:
+            return None
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError as exc:
+            logger.warning("Skipping invalid message preview for session %s: %s", session_id, exc)
+            return None
+        content = payload.get("content")
+        return content[:LAST_MESSAGE_PREVIEW_LIMIT] if isinstance(content, str) else None
+
+    def _hydrate_session_preview(self, session: SessionRecord) -> SessionRecord:
+        if session.last_message_preview is not None:
+            return session
+        preview = self._load_last_message_preview(session.session_id)
+        if preview is None:
+            return session
+        session.last_message_preview = preview
+        self.save_session(session)
+        return session
+
+    def _infer_turn_id_for_approval(self, approval_id: str) -> str | None:
+        for path in sorted(self.root.glob("sessions/*/turns/*.json")):
+            if path.name.endswith(".events.ndjson"):
+                continue
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                logger.warning("Skipping invalid turn record while resolving approval %s at %s: %s", approval_id, path, exc)
+                continue
+            approval_ids = payload.get("approval_ids")
+            turn_id = payload.get("turn_id")
+            if isinstance(approval_ids, list) and approval_id in approval_ids and isinstance(turn_id, str) and turn_id:
+                return turn_id
+        return None
+
+    def _load_approval_from_path(self, path: Path) -> ApprovalRecord | None:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            logger.warning("Skipping invalid approval record at %s: expected a JSON object", path)
+            return None
+        normalized = dict(payload)
+        approval_id = normalized.get("approval_id") if isinstance(normalized.get("approval_id"), str) else path.stem
+        run_id = normalized.pop("run_id", None)
+        if not normalized.get("turn_id"):
+            inferred_turn_id = self._infer_turn_id_for_approval(approval_id)
+            if inferred_turn_id is None:
+                logger.warning("Skipping legacy approval record at %s missing turn_id (run_id=%s)", path, run_id)
+                return None
+            normalized["turn_id"] = inferred_turn_id
+            logger.warning("Recovered legacy approval record at %s with inferred turn_id=%s", path, inferred_turn_id)
+        return ApprovalRecord.model_validate(normalized)
 
     def session_dir(self, session_id: str) -> Path:
         return self.root / "sessions" / session_id
@@ -187,7 +263,7 @@ class FileStorage:
         session = self._read_json(self.session_json_path(session_id), SessionRecord)
         if session.schema_version != "2.0":
             raise ValueError(f"Legacy session schema is not supported: {session_id}")
-        return session
+        return self._hydrate_session_preview(session)
 
     def list_sessions(self) -> list[SessionRecord]:
         sessions: list[SessionRecord] = []
@@ -198,13 +274,14 @@ class FileStorage:
                 continue
             if session.schema_version != "2.0":
                 continue
-            sessions.append(session)
+            sessions.append(self._hydrate_session_preview(session))
         return sorted(sessions, key=lambda item: item.updated_at, reverse=True)
 
     def append_message(self, message: MessageRecord) -> None:
         self._append_ndjson(self.session_messages_path(message.session_id), message)
         session = self.load_session(message.session_id)
         session.updated_at = message.created_at
+        session.last_message_preview = message.content[:LAST_MESSAGE_PREVIEW_LIMIT]
         if message.role.value == "user":
             session.last_user_message_id = message.message_id
         elif message.role.value == "assistant":
@@ -437,7 +514,10 @@ class FileStorage:
         self._write_json(self.approval_path(approval.approval_id), approval)
 
     def load_approval(self, approval_id: str) -> ApprovalRecord:
-        return self._read_json(self.approval_path(approval_id), ApprovalRecord)
+        approval = self._load_approval_from_path(self.approval_path(approval_id))
+        if approval is None:
+            raise ValueError(f"Legacy approval schema is not supported without an inferred turn_id: {approval_id}")
+        return approval
 
     def list_approvals(self, *, turn_id: str | None = None, status: str | None = None) -> list[ApprovalRecord]:
         approvals_dir = self.root / "sessions" / "_approvals"
@@ -446,9 +526,11 @@ class FileStorage:
             return approvals
         for path in sorted(approvals_dir.glob("*.json")):
             try:
-                approval = self._read_json(path, ApprovalRecord)
-            except ValidationError as exc:
+                approval = self._load_approval_from_path(path)
+            except (json.JSONDecodeError, ValidationError) as exc:
                 logger.warning("Skipping invalid approval record at %s: %s", path, exc)
+                continue
+            if approval is None:
                 continue
             if turn_id and approval.turn_id != turn_id:
                 continue

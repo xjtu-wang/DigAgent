@@ -15,6 +15,9 @@ from tests.turn_test_utils import (
 
 @pytest.mark.asyncio
 async def test_session_turn_endpoint_returns_turn_payload_and_persisted_records(app, manager, monkeypatch) -> None:
+    assistant_text = "turn contract ok " + ("x" * 160)
+    expected_preview = assistant_text[:140]
+
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
         session_response = await client.post(
             "/api/sessions",
@@ -28,7 +31,7 @@ async def test_session_turn_endpoint_returns_turn_payload_and_persisted_records(
                 manager,
                 session_id=kwargs["session_id"],
                 content=kwargs["content"],
-                assistant_text="turn contract ok",
+                assistant_text=assistant_text,
                 profile_name=kwargs["profile_name"],
                 auto_approve=kwargs["auto_approve"],
                 scope=kwargs["scope"],
@@ -47,14 +50,17 @@ async def test_session_turn_endpoint_returns_turn_payload_and_persisted_records(
         assert payload["turn_id"]
         assert payload["session"]["session_id"] == session_id
         assert payload["turn"]["turn_id"] == payload["turn_id"]
-        assert payload["turn"]["final_response"] == "turn contract ok"
+        assert payload["turn"]["final_response"] == assistant_text
         messages = (await client.get(f"/api/sessions/{session_id}/messages")).json()
         session_payload = (await client.get(f"/api/sessions/{session_id}")).json()
         turns = (await client.get(f"/api/sessions/{session_id}/turns")).json()
+        persisted_session = manager.storage.load_session(session_id)
         assert [item["role"] for item in messages] == ["user", "assistant"]
         assert [item["turn_id"] for item in messages] == [payload["turn_id"], payload["turn_id"]]
         assert session_payload["turn_ids"] == [payload["turn_id"]]
         assert session_payload["active_turn_id"] is None
+        assert session_payload["last_message_preview"] == expected_preview
+        assert persisted_session.last_message_preview == expected_preview
         assert [item["turn_id"] for item in turns] == [payload["turn_id"]]
 
 
@@ -131,6 +137,46 @@ async def test_get_session_ignores_legacy_approval_files(app, manager) -> None:
     assert payload["session_id"] == session.session_id
     assert payload["turns"][0]["turn_id"] == result.turn_id
     assert [item["approval_id"] for item in payload["turns"][0]["pending_approvals"]] == ["apr_turn_pending"]
+
+
+@pytest.mark.asyncio
+async def test_get_session_recovers_legacy_approval_missing_turn_id_when_turn_references_it(app, manager) -> None:
+    session = manager.create_session("legacy approval recovery", "sisyphus-default", Scope())
+    _, result = seed_pending_approval_turn(
+        manager,
+        session_id=session.session_id,
+        content="needs legacy approval recovery",
+        approval_id="apr_legacy_attached",
+    )
+    legacy_payload = {
+        "approval_id": "apr_legacy_attached",
+        "action_id": "act_legacy_attached",
+        "run_id": "run_legacy_only",
+        "status": "pending",
+        "action_digest": "sha256:legacy-attached",
+        "requested_by": "sisyphus-default",
+        "requested_at": "2026-04-18T12:00:00Z",
+        "resolved_at": None,
+        "resolver": None,
+        "reason": None,
+        "challenge": None,
+        "challenge_issued_at": None,
+        "challenge_expires_at": None,
+        "policy_key": None,
+        "kind": "primary",
+        "parent_approval_id": None,
+        "superseded_by": None,
+        "node_id": None,
+    }
+    manager.storage.approval_path("apr_legacy_attached").write_text(json.dumps(legacy_payload), encoding="utf-8")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get(f"/api/sessions/{session.session_id}")
+
+    response.raise_for_status()
+    payload = response.json()
+    assert payload["turns"][0]["turn_id"] == result.turn_id
+    assert [item["approval_id"] for item in payload["turns"][0]["pending_approvals"]] == ["apr_legacy_attached"]
 
 
 @pytest.mark.asyncio
