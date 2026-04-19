@@ -1,9 +1,0 @@
-name: web_fetch
-description: Fetch a target URL with GET or HEAD and normalize the response into evidence.
-action_type: tool
-risk_tags:
-  - network
-default_targets:
-  paths: []
-  domains: []
-executor_adapter: web_fetch

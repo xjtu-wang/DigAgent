@@ -1,8 +1,0 @@
-name: repo_search
-description: Search repository files and collect line-level evidence from local source trees.
-action_type: tool
-risk_tags: []
-default_targets:
-  paths: []
-  domains: []
-executor_adapter: repo_search

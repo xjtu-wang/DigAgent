@@ -27,5 +27,5 @@ network_scope: []
 filesystem_scope: []
 runtime_budget:
   max_parallel_subagents: 1
-  max_tool_calls: 20
-  max_runtime_seconds: 900
+  max_tool_calls: 1000
+  max_runtime_seconds: 3600

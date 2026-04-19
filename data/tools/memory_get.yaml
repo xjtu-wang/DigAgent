@@ -1,8 +1,0 @@
-name: memory_get
-description: Load a specific memory hit by ref after retrieval.
-action_type: tool
-risk_tags: []
-default_targets:
-  paths: []
-  domains: []
-executor_adapter: memory_get

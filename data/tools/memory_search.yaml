@@ -1,8 +1,0 @@
-name: memory_search
-description: Search layered long-term memory, daily notes, and wiki entries with scoped BM25 retrieval.
-action_type: tool
-risk_tags: []
-default_targets:
-  paths: []
-  domains: []
-executor_adapter: memory_search

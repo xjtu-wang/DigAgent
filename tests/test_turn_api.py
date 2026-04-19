@@ -213,3 +213,45 @@ async def test_session_event_history_supports_type_filter(test_settings, runtime
         )
         response.raise_for_status()
     assert [item["type"] for item in parse_sse_events(response.text)] == ["approval_required"]
+
+
+@pytest.mark.asyncio
+async def test_session_event_history_exposes_stable_indices_for_same_second_events(test_settings, runtime_modules) -> None:
+    turn_manager, create_app = runtime_modules
+    manager = turn_manager(test_settings)
+    app = create_app(manager)
+    session = manager.create_session("index-history", "sisyphus-default", Scope())
+    turn = manager.storage.create_turn(
+        session_id=session.session_id,
+        profile_name="sisyphus-default",
+        task="history order",
+        scope=Scope(),
+        budget=RuntimeBudget(),
+    )
+    for index, event_type in enumerate(["assistant_chunk", "langgraph_tasks", "tool_result"], start=1):
+        manager.storage.append_turn_event(
+            session.session_id,
+            TurnEvent(
+                event_id=f"evt-{index}",
+                session_id=session.session_id,
+                turn_id=turn.turn_id,
+                type=event_type,
+                data={"turn_id": turn.turn_id, "index": index},
+                created_at="2026-04-19T01:00:00Z",
+            ),
+        )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        turn_response = await client.get(f"/api/turns/{turn.turn_id}/events?history_only=true")
+        session_response = await client.get(f"/api/sessions/{session.session_id}/events?history_only=true")
+        turn_response.raise_for_status()
+        session_response.raise_for_status()
+
+    turn_history = parse_sse_events(turn_response.text)
+    session_history = [item for item in parse_sse_events(session_response.text) if item["turn_id"] == turn.turn_id]
+
+    assert [item["type"] for item in turn_history] == ["assistant_chunk", "langgraph_tasks", "tool_result"]
+    assert [item["turn_event_index"] for item in turn_history] == [1, 2, 3]
+    assert [item["type"] for item in session_history] == ["assistant_chunk", "langgraph_tasks", "tool_result"]
+    assert [item["turn_event_index"] for item in session_history] == [1, 2, 3]
+    assert [item["session_event_index"] for item in session_history] == [1, 2, 3]
