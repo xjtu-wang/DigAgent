@@ -1,9 +1,0 @@
-name: patch_apply
-description: Apply a structured patch inside an approved repository or workspace.
-action_type: tool
-risk_tags:
-  - filesystem_write
-default_targets:
-  paths: []
-  domains: []
-executor_adapter: patch_apply

@@ -1,12 +1,12 @@
 {
-  "status": "completed",
+  "status": "idle",
   "source": "nvd",
   "base_url": "https://services.nvd.nist.gov/rest/json/cves/2.0",
-  "total_records": 345039,
-  "normalized_records": 200,
-  "last_synced_at": "2026-04-17T11:24:20Z",
+  "total_records": 0,
+  "normalized_records": 0,
+  "last_synced_at": null,
   "last_error": null,
-  "last_source_hash": "sha256:c219b506899be1942c10001440e3e5f29c0c056babea568f692477840bb4bf00",
+  "last_source_hash": null,
   "next_start_index": 0,
   "page_size": 2000,
   "running": false

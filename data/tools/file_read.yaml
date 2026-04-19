@@ -1,8 +1,0 @@
-name: file_read
-description: Read a text file from an approved path, optionally by line range.
-action_type: tool
-risk_tags: []
-default_targets:
-  paths: []
-  domains: []
-executor_adapter: file_read

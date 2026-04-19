@@ -1,9 +1,0 @@
-name: web_search
-description: Search the web using a fixed search provider and normalize result links into evidence.
-action_type: tool
-risk_tags:
-  - network
-default_targets:
-  paths: []
-  domains: []
-executor_adapter: web_search

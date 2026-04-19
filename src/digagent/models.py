@@ -910,8 +910,6 @@ class TurnEvent(DigAgentModel):
     turn_id: str | None = None
     type: str
     data: dict[str, Any]
-    turn_event_index: int | None = None
-    session_event_index: int | None = None
     speaker_profile: str | None = None
     addressed_participants: list[str] = Field(default_factory=list)
     participant_profile: str | None = None

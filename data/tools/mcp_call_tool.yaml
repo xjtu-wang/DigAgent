@@ -1,8 +1,0 @@
-name: mcp_call_tool
-description: 调用指定 MCP 服务器上的工具，并将结果纳入统一审计与证据链。
-action_type: tool
-risk_tags: []
-default_targets:
-  paths: []
-  domains: []
-executor_adapter: mcp_call_tool
