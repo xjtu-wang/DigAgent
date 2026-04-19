@@ -1,0 +1,8 @@
+name: mcp_list_servers
+description: 列出当前配置的 MCP 服务器目录与启用状态。
+action_type: tool
+risk_tags: []
+default_targets:
+  paths: []
+  domains: []
+executor_adapter: mcp_list_servers

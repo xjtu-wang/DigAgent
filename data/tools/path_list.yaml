@@ -1,0 +1,8 @@
+name: path_list
+description: List files and directories under an approved root path with glob filtering.
+action_type: tool
+risk_tags: []
+default_targets:
+  paths: []
+  domains: []
+executor_adapter: path_list

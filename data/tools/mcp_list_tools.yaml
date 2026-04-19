@@ -1,0 +1,8 @@
+name: mcp_list_tools
+description: 列出指定 MCP 服务器当前暴露的工具清单。
+action_type: tool
+risk_tags: []
+default_targets:
+  paths: []
+  domains: []
+executor_adapter: mcp_list_tools

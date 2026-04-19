@@ -1,0 +1,8 @@
+name: mcp_read_resource
+description: Read a configured read-only MCP-style resource and normalize its content into evidence.
+action_type: tool
+risk_tags: []
+default_targets:
+  paths: []
+  domains: []
+executor_adapter: mcp_read_resource

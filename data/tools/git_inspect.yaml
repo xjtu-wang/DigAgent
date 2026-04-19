@@ -1,0 +1,8 @@
+name: git_inspect
+description: Run read-only git inspection commands such as status, diff, show, log, and rev-parse.
+action_type: tool
+risk_tags: []
+default_targets:
+  paths: []
+  domains: []
+executor_adapter: git_inspect

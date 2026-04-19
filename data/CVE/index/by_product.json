@@ -1,0 +1,585 @@
+{
+  "eric_allman:sendmail": [
+    "CVE-1999-0095",
+    "CVE-1999-0129",
+    "CVE-1999-0130",
+    "CVE-1999-0131",
+    "CVE-1999-0145",
+    "CVE-1999-0163",
+    "CVE-1999-0203",
+    "CVE-1999-0204",
+    "CVE-1999-0206"
+  ],
+  "ftp:ftp": [
+    "CVE-1999-0082",
+    "CVE-1999-0201"
+  ],
+  "ftpcd:ftpcd": [
+    "CVE-1999-0082"
+  ],
+  "bsd:bsd": [
+    "CVE-1999-1098",
+    "CVE-1999-1471"
+  ],
+  "sun:sunos": [
+    "CVE-1999-0019",
+    "CVE-1999-0022",
+    "CVE-1999-0023",
+    "CVE-1999-0032",
+    "CVE-1999-0078",
+    "CVE-1999-0099",
+    "CVE-1999-0120",
+    "CVE-1999-0128",
+    "CVE-1999-0129",
+    "CVE-1999-0132",
+    "CVE-1999-0134",
+    "CVE-1999-0135",
+    "CVE-1999-0136",
+    "CVE-1999-0143",
+    "CVE-1999-0164",
+    "CVE-1999-0167",
+    "CVE-1999-0168",
+    "CVE-1999-0209",
+    "CVE-1999-0211",
+    "CVE-1999-0214",
+    "CVE-1999-0217",
+    "CVE-1999-0241",
+    "CVE-1999-0277",
+    "CVE-1999-0334",
+    "CVE-1999-1021",
+    "CVE-1999-1080",
+    "CVE-1999-1122",
+    "CVE-1999-1123",
+    "CVE-1999-1137",
+    "CVE-1999-1142",
+    "CVE-1999-1197",
+    "CVE-1999-1211",
+    "CVE-1999-1212",
+    "CVE-1999-1258",
+    "CVE-1999-1318",
+    "CVE-1999-1388",
+    "CVE-1999-1396",
+    "CVE-1999-1413",
+    "CVE-1999-1438",
+    "CVE-1999-1467",
+    "CVE-1999-1468",
+    "CVE-1999-1506",
+    "CVE-1999-1507",
+    "CVE-1999-1580"
+  ],
+  "sun:nfs": [
+    "CVE-1999-0084",
+    "CVE-1999-0166"
+  ],
+  "freebsd:freebsd": [
+    "CVE-1999-0022",
+    "CVE-1999-0023",
+    "CVE-1999-0032",
+    "CVE-1999-0078",
+    "CVE-1999-0085",
+    "CVE-1999-0096",
+    "CVE-1999-0129",
+    "CVE-1999-0130",
+    "CVE-1999-0131",
+    "CVE-1999-0138",
+    "CVE-1999-0297",
+    "CVE-1999-1187",
+    "CVE-1999-1301",
+    "CVE-1999-1313",
+    "CVE-1999-1314",
+    "CVE-1999-1385",
+    "CVE-1999-1572",
+    "CVE-2000-0388"
+  ],
+  "next:next": [
+    "CVE-1999-1193",
+    "CVE-1999-1198",
+    "CVE-1999-1391",
+    "CVE-1999-1392",
+    "CVE-1999-1468"
+  ],
+  "next:nex": [
+    "CVE-1999-1392"
+  ],
+  "digital:vms": [
+    "CVE-1999-1057"
+  ],
+  "sgi:irix": [
+    "CVE-1999-0019",
+    "CVE-1999-0022",
+    "CVE-1999-0032",
+    "CVE-1999-0044",
+    "CVE-1999-0073",
+    "CVE-1999-0078",
+    "CVE-1999-0208",
+    "CVE-1999-0234",
+    "CVE-1999-0241",
+    "CVE-1999-1022",
+    "CVE-1999-1219",
+    "CVE-1999-1243",
+    "CVE-1999-1319",
+    "CVE-1999-1384",
+    "CVE-1999-1401",
+    "CVE-1999-1468",
+    "CVE-1999-1494",
+    "CVE-1999-1554"
+  ],
+  "hp:apollo_domain_os": [
+    "CVE-1999-1115",
+    "CVE-1999-1493"
+  ],
+  "digital:ultrix": [
+    "CVE-1999-0170",
+    "CVE-1999-1032",
+    "CVE-1999-1194",
+    "CVE-1999-1415"
+  ],
+  "att:svr4": [
+    "CVE-1999-1034",
+    "CVE-1999-1059"
+  ],
+  "ncsa:telnet": [
+    "CVE-1999-1090"
+  ],
+  "cray:unicos": [
+    "CVE-1999-0099",
+    "CVE-1999-1468"
+  ],
+  "ibm:aix": [
+    "CVE-1999-0019",
+    "CVE-1999-0022",
+    "CVE-1999-0023",
+    "CVE-1999-0078",
+    "CVE-1999-0085",
+    "CVE-1999-0099",
+    "CVE-1999-0101",
+    "CVE-1999-0113",
+    "CVE-1999-0116",
+    "CVE-1999-0117",
+    "CVE-1999-0128",
+    "CVE-1999-0129",
+    "CVE-1999-0130",
+    "CVE-1999-0131",
+    "CVE-1999-0138",
+    "CVE-1999-0208",
+    "CVE-1999-0337",
+    "CVE-1999-0338",
+    "CVE-1999-0627",
+    "CVE-1999-1119",
+    "CVE-1999-1121",
+    "CVE-1999-1552"
+  ],
+  "dec:dec_openvms": [
+    "CVE-1999-1395"
+  ],
+  "cisco:ios": [
+    "CVE-1999-0161",
+    "CVE-1999-1306",
+    "CVE-1999-1466"
+  ],
+  "hp:hp-ux": [
+    "CVE-1999-0022",
+    "CVE-1999-0050",
+    "CVE-1999-0078",
+    "CVE-1999-0127",
+    "CVE-1999-0129",
+    "CVE-1999-0130",
+    "CVE-1999-0131",
+    "CVE-1999-0132",
+    "CVE-1999-0138",
+    "CVE-1999-0246",
+    "CVE-1999-0308",
+    "CVE-1999-0311",
+    "CVE-1999-0312",
+    "CVE-1999-0324",
+    "CVE-1999-0325",
+    "CVE-1999-0336",
+    "CVE-1999-0423",
+    "CVE-1999-0961",
+    "CVE-1999-1089",
+    "CVE-1999-1134",
+    "CVE-1999-1135",
+    "CVE-1999-1146",
+    "CVE-1999-1161",
+    "CVE-1999-1205",
+    "CVE-1999-1238",
+    "CVE-1999-1239",
+    "CVE-1999-1242",
+    "CVE-1999-1248",
+    "CVE-1999-1251"
+  ],
+  "commodore:amiga_unix": [
+    "CVE-1999-1218"
+  ],
+  "dec:dec_openvms_axp": [
+    "CVE-1999-1312"
+  ],
+  "dec:dec_openvms_vax": [
+    "CVE-1999-1312"
+  ],
+  "cisco:router": [
+    "CVE-1999-1216"
+  ],
+  "sco:open_desktop": [
+    "CVE-1999-0019",
+    "CVE-1999-0023",
+    "CVE-1999-0128",
+    "CVE-1999-1138",
+    "CVE-1999-1162",
+    "CVE-1999-1302",
+    "CVE-1999-1303",
+    "CVE-1999-1304",
+    "CVE-1999-1305"
+  ],
+  "sco:unix": [
+    "CVE-1999-1138",
+    "CVE-1999-1162",
+    "CVE-1999-1302",
+    "CVE-1999-1303",
+    "CVE-1999-1304",
+    "CVE-1999-1305"
+  ],
+  "university_of_minnesota:gopherd": [
+    "CVE-1999-0124"
+  ],
+  "novell:netware": [
+    "CVE-1999-1215"
+  ],
+  "sco:open_desktop_lite": [
+    "CVE-1999-1138",
+    "CVE-1999-1302",
+    "CVE-1999-1303",
+    "CVE-1999-1304",
+    "CVE-1999-1305"
+  ],
+  "sco:openserver": [
+    "CVE-1999-0019",
+    "CVE-1999-0023",
+    "CVE-1999-0078",
+    "CVE-1999-0096",
+    "CVE-1999-0128",
+    "CVE-1999-0129",
+    "CVE-1999-0131",
+    "CVE-1999-1138",
+    "CVE-1999-1253"
+  ],
+  "sun:solaris": [
+    "CVE-1999-0022",
+    "CVE-1999-0099",
+    "CVE-1999-0129",
+    "CVE-1999-0132",
+    "CVE-1999-0135",
+    "CVE-1999-0241",
+    "CVE-1999-0334",
+    "CVE-1999-1026",
+    "CVE-1999-1137",
+    "CVE-1999-1413"
+  ],
+  "rpc.walld:rpc.walld": [
+    "CVE-1999-0181"
+  ],
+  "great_circle_associates:majordomo": [
+    "CVE-1999-0207"
+  ],
+  "sco:openserver_enterprise_system": [
+    "CVE-1999-1302",
+    "CVE-1999-1303",
+    "CVE-1999-1304",
+    "CVE-1999-1305"
+  ],
+  "sco:openserver_network_system": [
+    "CVE-1999-1302",
+    "CVE-1999-1303",
+    "CVE-1999-1304",
+    "CVE-1999-1305"
+  ],
+  "debian:debian_linux": [
+    "CVE-1999-1572",
+    "CVE-2000-0508"
+  ],
+  "mandrakesoft:mandrake_linux": [
+    "CVE-1999-1572",
+    "CVE-2000-0508"
+  ],
+  "redhat:linux": [
+    "CVE-1999-0043",
+    "CVE-1999-0130",
+    "CVE-1999-0131",
+    "CVE-1999-0234",
+    "CVE-1999-0297",
+    "CVE-1999-1186",
+    "CVE-1999-1491",
+    "CVE-2000-0508"
+  ],
+  "microsoft:windows_nt": [
+    "CVE-1999-0077",
+    "CVE-1999-0179",
+    "CVE-1999-0249"
+  ],
+  "ncsa_httpd_project:ncsa_httpd": [
+    "CVE-1999-0232"
+  ],
+  "ncsa:ncsa_web_server": [
+    "CVE-1999-0235"
+  ],
+  "slackware:slackware_linux": [
+    "CVE-1999-0123",
+    "CVE-1999-0242",
+    "CVE-1999-1186",
+    "CVE-1999-1187"
+  ],
+  "satan:satan": [
+    "CVE-1999-0151"
+  ],
+  "john_s._roberts:anyform": [
+    "CVE-1999-0066"
+  ],
+  "matt_wright:formmail": [
+    "CVE-1999-0172",
+    "CVE-1999-0173"
+  ],
+  "sendmail:sendmail": [
+    "CVE-1999-1309",
+    "CVE-1999-1580"
+  ],
+  "aladdin_enterprises:ghostscript": [
+    "CVE-1999-0155"
+  ],
+  "linux:linux_kernel": [
+    "CVE-1999-0128",
+    "CVE-1999-0138",
+    "CVE-1999-0171",
+    "CVE-1999-0245"
+  ],
+  "livingston_portmaster:portmaster": [
+    "CVE-1999-0218"
+  ],
+  "digital:osf_1": [
+    "CVE-1999-0073",
+    "CVE-1999-0128",
+    "CVE-1999-0131",
+    "CVE-1999-0138",
+    "CVE-1999-1103"
+  ],
+  "digital:unix": [
+    "CVE-1999-0073",
+    "CVE-1999-1221"
+  ],
+  "bsdi:bsd_os": [
+    "CVE-1999-0022",
+    "CVE-1999-0023",
+    "CVE-1999-0032",
+    "CVE-1999-0043",
+    "CVE-1999-0078",
+    "CVE-1999-0096",
+    "CVE-1999-0099",
+    "CVE-1999-0129",
+    "CVE-1999-0130",
+    "CVE-1999-0131",
+    "CVE-1999-0297"
+  ],
+  "convex:convexos": [
+    "CVE-1999-0099"
+  ],
+  "convex:spp-ux": [
+    "CVE-1999-0099"
+  ],
+  "xfree86_project:x11r6": [
+    "CVE-1999-0241"
+  ],
+  "washington_university:wu-ftpd": [
+    "CVE-1999-0075",
+    "CVE-1999-0080"
+  ],
+  "sam_lantinga:splitvt": [
+    "CVE-1999-0316"
+  ],
+  "nec:asl_ux_4800": [
+    "CVE-1999-0138",
+    "CVE-1999-0208"
+  ],
+  "nec:ews-ux_v": [
+    "CVE-1999-0138",
+    "CVE-1999-0208"
+  ],
+  "nec:up-ux_v": [
+    "CVE-1999-0078",
+    "CVE-1999-0138",
+    "CVE-1999-0208"
+  ],
+  "rxvt:rxvt": [
+    "CVE-1999-1186"
+  ],
+  "mit:kerberos": [
+    "CVE-1999-0143"
+  ],
+  "mit:kerberos_5": [
+    "CVE-1999-0143"
+  ],
+  "process_software:multinet": [
+    "CVE-1999-0143"
+  ],
+  "microsoft:internet_information_services": [
+    "CVE-1999-0233"
+  ],
+  "netscape:navigator": [
+    "CVE-1999-0141",
+    "CVE-1999-0142"
+  ],
+  "sun:java": [
+    "CVE-1999-0142"
+  ],
+  "apache:http_server": [
+    "CVE-1999-0045",
+    "CVE-1999-0067",
+    "CVE-1999-0070",
+    "CVE-1999-0236"
+  ],
+  "ncsa:ncsa_httpd": [
+    "CVE-1999-0067"
+  ],
+  "ncr:mp-ras": [
+    "CVE-1999-0019",
+    "CVE-1999-0078"
+  ],
+  "next:nextstep": [
+    "CVE-1999-0032",
+    "CVE-1999-0078"
+  ],
+  "sco:unixware": [
+    "CVE-1999-0019",
+    "CVE-1999-0023",
+    "CVE-1999-0078",
+    "CVE-1999-1252"
+  ],
+  "data_general:dg_ux": [
+    "CVE-1999-0019"
+  ],
+  "nighthawk:cx_ux": [
+    "CVE-1999-0019"
+  ],
+  "nighthawk:powerux": [
+    "CVE-1999-0019"
+  ],
+  "sco:internet_faststart": [
+    "CVE-1999-0023",
+    "CVE-1999-0096",
+    "CVE-1999-0128",
+    "CVE-1999-0129",
+    "CVE-1999-0131",
+    "CVE-1999-1253"
+  ],
+  "apple:a_ux": [
+    "CVE-1999-0138"
+  ],
+  "novell:web_server": [
+    "CVE-1999-0175"
+  ],
+  "fred_n._van_kempen:dip": [
+    "CVE-1999-0137"
+  ],
+  "redhat:enterprise_linux": [
+    "CVE-1999-1572"
+  ],
+  "redhat:enterprise_linux_desktop": [
+    "CVE-1999-1572"
+  ],
+  "ubuntu:ubuntu_linux": [
+    "CVE-1999-1572"
+  ],
+  "inet:inet": [
+    "CVE-1999-0023"
+  ],
+  "sco:tcp_ip": [
+    "CVE-1999-0023",
+    "CVE-1999-0128"
+  ],
+  "adobe:framemaker": [
+    "CVE-1999-0133"
+  ],
+  "netbsd:netbsd": [
+    "CVE-1999-0085",
+    "CVE-1999-0297"
+  ],
+  "university_of_washington:pine": [
+    "CVE-1999-1187"
+  ],
+  "gnu:bash": [
+    "CVE-1999-1383"
+  ],
+  "tcsh:tcsh": [
+    "CVE-1999-1383"
+  ],
+  "transarc:dce_distributed_file_system": [
+    "CVE-1999-1295"
+  ],
+  "ibm:sng": [
+    "CVE-1999-0116",
+    "CVE-1999-0128"
+  ],
+  "yggdrasil:linux": [
+    "CVE-1999-0234"
+  ],
+  "caldera:openlinux": [
+    "CVE-1999-0043",
+    "CVE-1999-0234"
+  ],
+  "suse:suse_linux": [
+    "CVE-1999-0234"
+  ],
+  "caldera:network_desktop": [
+    "CVE-1999-0130"
+  ],
+  "kth:kth_kerberos": [
+    "CVE-1999-1099"
+  ],
+  "gracenote:cddbd": [
+    "CVE-1999-1240"
+  ],
+  "isc:inn": [
+    "CVE-1999-0043",
+    "CVE-1999-0100"
+  ],
+  "netscape:news_server": [
+    "CVE-1999-0043"
+  ],
+  "nec:goah_intrasv": [
+    "CVE-1999-0043"
+  ],
+  "nec:goah_networksv": [
+    "CVE-1999-0043"
+  ],
+  "netscape:commerce_server": [
+    "CVE-1999-0045"
+  ],
+  "netscape:communications_server": [
+    "CVE-1999-0045"
+  ],
+  "netscape:enterprise_server": [
+    "CVE-1999-0045"
+  ],
+  "paul_vixie:vixie_cron": [
+    "CVE-1999-0297"
+  ],
+  "renaud_deraison:jj": [
+    "CVE-1999-0260"
+  ],
+  "oreilly:oreilly_website": [
+    "CVE-1999-0178"
+  ],
+  "microsoft:windows_95": [
+    "CVE-1999-0179"
+  ],
+  "university_of_washington:wu-ftpd": [
+    "CVE-1999-0202"
+  ],
+  "illinois:ncsa_httpd": [
+    "CVE-1999-0236"
+  ],
+  "microsoft:windows_2000": [
+    "CVE-1999-0249"
+  ],
+  "talkd:talkd": [
+    "CVE-1999-0251"
+  ]
+}

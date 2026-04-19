@@ -215,3 +215,36 @@ async def test_stream_events_defaults_to_tail_only(manager) -> None:
     event = await asyncio.wait_for(anext(stream), timeout=0.3)
     await append_task
     assert event.event_id == "evt_new"
+
+
+@pytest.mark.asyncio
+async def test_session_event_history_preserves_append_order_for_same_second_events(manager) -> None:
+    session = manager.create_session("same-second-order", "sisyphus-default", Scope())
+    turn = manager.storage.create_turn(
+        session_id=session.session_id,
+        profile_name="sisyphus-default",
+        task="keep order",
+        scope=Scope(),
+        budget=RuntimeBudget(),
+    )
+    for index, event_type in enumerate(["assistant_chunk", "langgraph_tasks", "tool_result"], start=1):
+        manager.storage.append_turn_event(
+            session.session_id,
+            TurnEvent(
+                event_id=f"evt_{index}",
+                session_id=session.session_id,
+                turn_id=turn.turn_id,
+                type=event_type,
+                data={"turn_id": turn.turn_id, "index": index},
+                created_at="2026-04-19T10:00:00Z",
+            ),
+        )
+
+    turn_history = manager.load_turn_event_history(turn.turn_id)
+    session_history = manager.load_session_event_history(session.session_id)
+
+    assert [item.type for item in turn_history] == ["assistant_chunk", "langgraph_tasks", "tool_result"]
+    assert [item.turn_event_index for item in turn_history] == [1, 2, 3]
+    scoped = [item for item in session_history if item.turn_id == turn.turn_id]
+    assert [item.type for item in scoped] == ["assistant_chunk", "langgraph_tasks", "tool_result"]
+    assert [item.session_event_index for item in scoped] == [1, 2, 3]

@@ -1,0 +1,8 @@
+name: mcp_list_resources
+description: List configured read-only MCP-style resources available to the agent runtime.
+action_type: tool
+risk_tags: []
+default_targets:
+  paths: []
+  domains: []
+executor_adapter: mcp_list_resources
