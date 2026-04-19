@@ -99,21 +99,13 @@ test("buildPrimaryTimeline emits a chat-style conversation flow", () => {
   const timeline = buildPrimaryTimeline(messages, events, turns, true);
 
   assert.deepEqual(timeline.map((item) => item.type), [
-    "user_message",
-    "assistant_thought",
-    "tool_action",
-    "tool_observation",
-    "participant_handoff",
-    "participant_message",
+    "local_user",
+    "turn_card",
     "assistant_message",
   ]);
-  assert.deepEqual(timeline[0].data.addressed_participants, ["hephaestus-deepworker"]);
-  assert.equal(timeline[1].data.detail, "先看页面。");
-  assert.equal(timeline[2].data.tool_name, "web_fetch");
-  assert.equal(timeline[2].data.argument_count, 1);
-  assert.equal(timeline[3].data.source_host, "example.com");
-  assert.equal(timeline[4].data.handoff_to, "hephaestus-deepworker");
-  assert.equal(timeline[5].data.participant_profile, "hephaestus-deepworker");
+  assert.equal(timeline[1].data.goal, "@hephaestus-deepworker 检查页面");
+  assert.equal(timeline[1].data.result_summary, "结论");
+  assert.equal(timeline[2].data.message, "结论");
 });
 
 test("buildPrimaryTimeline hides approval and notice cards when disabled", () => {
@@ -136,5 +128,5 @@ test("buildPrimaryTimeline hides approval and notice cards when disabled", () =>
     false,
   );
 
-  assert.deepEqual(timeline.map((item) => item.type), ["user_message"]);
+  assert.deepEqual(timeline.map((item) => item.type), ["local_user"]);
 });
