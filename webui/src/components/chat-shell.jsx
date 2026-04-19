@@ -1,14 +1,15 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Archive, ArrowUp, Settings2, ShieldCheck, SquarePen, XCircle } from "lucide-react";
 import { compactText } from "../chat-utils";
-import { shouldSubmitComposer } from "../composer-utils";
+import { collectComposerMentions, normalizeMentionAgents } from "../composer-utils";
 import { countOverrides } from "../permissions-store";
 import { ChatTimeline } from "./chat-timeline";
+import { ComposerMentionInput } from "./composer-mention-input";
 import { PermissionsPanel } from "./permissions-panel";
 import { InspectorDrawer, InspectorToggleButton } from "./runtime-panels";
 import { MobileSidebar, MobileSidebarButton, SessionSidebar } from "./session-sidebar";
 import { StatusPill } from "./status-pill";
-import { Badge, Button, Textarea } from "./ui";
+import { Badge, Button } from "./ui";
 
 function ClampedText({ className = "", text }) {
   const value = text || "新聊天";
@@ -82,8 +83,8 @@ function WorkspaceHeader({ activeTurn, canArchiveCurrentSession, canDeleteCurren
   );
 }
 
-function ComposerPanel({ activeTurn, onCancelTurn, onDownloadReport, onSendMessage, permissionOverrides, runtimeDraft, session, settings, setTask, task }) {
-  const [isComposing, setIsComposing] = useState(false);
+function ComposerPanel({ activeTurn, agents, onCancelTurn, onDownloadReport, onSendMessage, permissionOverrides, runtimeDraft, session, settings, setTask, task }) {
+  const mentionAgents = useMemo(() => normalizeMentionAgents(agents), [agents]);
   const chips = useMemo(() => {
     const entries = [runtimeDraft.profile];
     if (runtimeDraft.repoPath) entries.push(runtimeDraft.repoPath);
@@ -92,20 +93,23 @@ function ComposerPanel({ activeTurn, onCancelTurn, onDownloadReport, onSendMessa
     if (permissionOverrides?.auto_approve) entries.push("会话自动审批");
     return entries;
   }, [permissionOverrides?.auto_approve, runtimeDraft]);
-
-  function handleKeyDown(event) {
-    if (!shouldSubmitComposer(event, { enterToSend: settings.chatPreferences.enterToSend, isComposing })) {
-      return;
-    }
-    event.preventDefault();
-    void onSendMessage();
-  }
+  const submitPayload = useMemo(() => ({
+    content: task.trim(),
+    mentions: collectComposerMentions(task, mentionAgents).filter((item) => item.configured).map((item) => item.name),
+  }), [mentionAgents, task]);
 
   return (
     <div className="border-t border-slate-200/70 bg-white px-3 pb-4 pt-3 md:px-4">
       <div className="mx-auto max-w-3xl">
         <div className="rounded-[1.75rem] border border-slate-200 bg-white shadow-[0_2px_10px_rgba(0,0,0,0.04)] transition focus-within:border-slate-300 focus-within:shadow-[0_4px_16px_rgba(0,0,0,0.06)]">
-          <Textarea className="max-h-[240px] min-h-[56px] resize-none border-0 bg-transparent px-5 py-4 text-[15px] leading-7 shadow-none focus:border-transparent focus:ring-0" placeholder="向 DigAgent 发送消息" value={task} onChange={(event) => setTask(event.target.value)} onCompositionEnd={() => setIsComposing(false)} onCompositionStart={() => setIsComposing(true)} onKeyDown={handleKeyDown} />
+          <ComposerMentionInput
+            agents={agents}
+            enterToSend={settings.chatPreferences.enterToSend}
+            onSubmit={(payload) => void onSendMessage(payload)}
+            placeholder="向 DigAgent 发送消息，输入 @agent 可自动补全"
+            setValue={setTask}
+            value={task}
+          />
           <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-3">
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
               {chips.map((chip) => <Badge key={chip} className="bg-slate-100 text-[11px] text-slate-600">{chip}</Badge>)}
@@ -118,7 +122,7 @@ function ComposerPanel({ activeTurn, onCancelTurn, onDownloadReport, onSendMessa
                   <Button variant="ghost" size="sm" onClick={() => onDownloadReport(session.latest_report_id, "pdf")}>PDF</Button>
                 </>
               ) : null}
-              <Button size="sm" className="h-9 w-9 rounded-full p-0" onClick={() => void onSendMessage()} disabled={!task.trim()}>
+              <Button size="sm" className="h-9 w-9 rounded-full p-0" onClick={() => void onSendMessage(submitPayload)} disabled={!submitPayload.content}>
                 <ArrowUp size={16} />
               </Button>
             </div>
@@ -188,7 +192,7 @@ export function WorkspacePage({ catalog, controller, onOpenSettings, settings })
               )}
             </div>
 
-            <ComposerPanel activeTurn={controller.activeTurn} onCancelTurn={() => void controller.cancelCurrentTurn()} onDownloadReport={controller.downloadReport} onSendMessage={controller.sendMessage} permissionOverrides={controller.permissionOverrides} runtimeDraft={controller.runtimeDraft} session={controller.session} settings={settings} setTask={controller.setTask} task={controller.task} />
+            <ComposerPanel activeTurn={controller.activeTurn} agents={catalog?.profiles || []} onCancelTurn={() => void controller.cancelCurrentTurn()} onDownloadReport={controller.downloadReport} onSendMessage={controller.sendMessage} permissionOverrides={controller.permissionOverrides} runtimeDraft={controller.runtimeDraft} session={controller.session} settings={settings} setTask={controller.setTask} task={controller.task} />
           </main>
         </div>
 

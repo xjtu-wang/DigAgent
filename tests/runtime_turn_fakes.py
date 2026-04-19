@@ -38,17 +38,22 @@ class DummyMcpRuntime:
 
 
 class FakeAgent:
-    def __init__(self) -> None:
+    def __init__(self, *, name: str = "assistant", reply_prefix: str = "reply") -> None:
+        self.name = name
+        self.reply_prefix = reply_prefix
         self.snapshots: dict[str, FakeSnapshot] = {}
         self.slow_gate = asyncio.Event()
+        self.calls: list[dict[str, Any]] = []
 
     async def astream(self, input_value: Any, config: dict[str, Any], **_: Any):
         thread_id = config["configurable"]["thread_id"]
         if isinstance(input_value, Command):
+            self.calls.append({"thread_id": thread_id, "resume": True})
             yield ("updates", {"resumed": True})
             self.snapshots[thread_id] = FakeSnapshot({"messages": [FakeMessage("approved")]})
             return
         message = input_value["messages"][0].content
+        self.calls.append({"thread_id": thread_id, "message": message})
         if message == "slow":
             yield ("updates", {"phase": "slow-start"})
             await self.slow_gate.wait()
@@ -60,7 +65,7 @@ class FakeAgent:
             self.snapshots[thread_id] = FakeSnapshot({"messages": []}, interrupts=(interrupt,))
             yield ("updates", {"phase": "approval"})
             return
-        reply = f"reply:{message}"
+        reply = f"{self.reply_prefix}:{message}"
         self.snapshots[thread_id] = FakeSnapshot({"messages": [FakeMessage(reply)]})
         yield ("updates", {"phase": "done", "reply": reply})
 
@@ -73,8 +78,11 @@ class FakeAgent:
         return FakeGraph()
 
 
-def fake_runtime_factory(agent: FakeAgent):
+def fake_runtime_factory(agent_or_factory):
     async def _build_runtime(**_: Any):
+        agent = agent_or_factory
+        if callable(agent_or_factory):
+            agent = agent_or_factory(**_)
         return SimpleNamespace(
             agent=agent,
             backend=None,

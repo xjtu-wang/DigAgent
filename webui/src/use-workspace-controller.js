@@ -26,6 +26,12 @@ const SESSION_REFRESH_EVENT_TYPES = new Set([
   "turn_recorded",
 ]);
 const PRIMARY_TIMELINE_EVENT_TYPES = [
+  "assistant_chunk",
+  "langgraph_tasks",
+  "tool_result",
+  "participant_handoff",
+  "participant_message",
+  "subagent",
   "approval_required",
   "approval_expired",
   "approval_superseded",
@@ -33,6 +39,7 @@ const PRIMARY_TIMELINE_EVENT_TYPES = [
   "failed",
   "timed_out",
   "cancelled",
+  "awaiting_user_input",
 ];
 
 async function readJson(response) {
@@ -64,7 +71,19 @@ function sortMessages(messages) {
 
 function commitAssistantMessage(messages, payload) {
   const turnId = payload.turn_id || payload.data?.turn_id || null;
-  const message = { message_id: payload.data.message_id, session_id: payload.session_id, turn_id: turnId, role: "assistant", sender: "sisyphus", content: payload.data.message, evidence_refs: payload.data.evidence_refs || [], artifact_refs: payload.data.artifact_refs || [], created_at: payload.created_at };
+  const message = {
+    message_id: payload.data.message_id,
+    session_id: payload.session_id,
+    turn_id: turnId,
+    role: "assistant",
+    sender: payload.data?.speaker_profile || "assistant",
+    speaker_profile: payload.data?.speaker_profile || null,
+    addressed_participants: payload.data?.addressed_participants || [],
+    content: payload.data.message,
+    evidence_refs: payload.data.evidence_refs || [],
+    artifact_refs: payload.data.artifact_refs || [],
+    created_at: payload.created_at,
+  };
   if (messages.some((item) => item.message_id === message.message_id)) {
     return messages;
   }
@@ -609,15 +628,39 @@ export function useWorkspaceController(appSettings) {
     return payload.session_id;
   }
 
-  async function sendMessage() {
-    if (!task.trim()) return;
+  async function sendMessage(options = {}) {
+    const message = typeof options.content === "string" ? options.content.trim() : task.trim();
+    const mentions = Array.isArray(options.mentions) ? options.mentions.filter(Boolean) : [];
+    if (!message) return;
     try {
       setRequestPending(true);
-      const message = task.trim();
       const sessionId = await ensureSession(message);
-      setMessages((current) => sortMessages([...current, { message_id: `local-${Date.now()}`, session_id: sessionId, turn_id: null, role: "user", sender: "user", content: message, evidence_refs: [], artifact_refs: [], created_at: new Date().toISOString() }]));
+      setMessages((current) => sortMessages([...current, {
+        message_id: `local-${Date.now()}`,
+        session_id: sessionId,
+        turn_id: null,
+        role: "user",
+        sender: "user",
+        speaker_profile: "user",
+        mentions,
+        addressed_participants: mentions,
+        content: message,
+        evidence_refs: [],
+        artifact_refs: [],
+        created_at: new Date().toISOString(),
+      }]));
       setTask("");
-      const payload = await readJson(await fetch(`/api/sessions/${sessionId}/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: message, profile: runtimeDraft.profile, scope: scopePayload(runtimeDraft.repoPath, runtimeDraft.domain), auto_approve: runtimeDraft.autoApprove }) }));
+      const payload = await readJson(await fetch(`/api/sessions/${sessionId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: message,
+          profile: runtimeDraft.profile,
+          scope: scopePayload(runtimeDraft.repoPath, runtimeDraft.domain),
+          auto_approve: runtimeDraft.autoApprove,
+          mentions,
+        }),
+      }));
       if (payload.session) setSession(payload.session);
       await hydrateSession(sessionId);
       if (!payload.turn) setRequestPending(false);

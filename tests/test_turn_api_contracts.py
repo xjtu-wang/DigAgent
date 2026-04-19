@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -62,6 +63,55 @@ async def test_session_turn_endpoint_returns_turn_payload_and_persisted_records(
         assert session_payload["last_message_preview"] == expected_preview
         assert persisted_session.last_message_preview == expected_preview
         assert [item["turn_id"] for item in turns] == [payload["turn_id"]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path_template", "payload"),
+    [
+        ("/api/sessions/{session_id}/turns", {"content": "inspect", "profile": "sisyphus-default"}),
+        ("/api/sessions/{session_id}/messages", {"content": "inspect", "profile": "sisyphus-default"}),
+        ("/api/turns", {"task": "inspect", "profile": "sisyphus-default"}),
+    ],
+)
+async def test_turn_endpoints_forward_mentions_to_manager(app, manager, monkeypatch, path_template, payload) -> None:
+    captured: list[dict[str, Any]] = []
+
+    async def stub_handle_message(**kwargs):
+        captured.append(kwargs)
+        session_id = kwargs["session_id"]
+        return seed_completed_turn(
+            manager,
+            session_id=session_id,
+            content=kwargs["content"],
+            assistant_text="mention contract",
+            profile_name=kwargs["profile_name"],
+            auto_approve=kwargs["auto_approve"],
+            scope=kwargs["scope"],
+            title=kwargs["title"],
+        )
+
+    monkeypatch.setattr(manager, "handle_message", stub_handle_message)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        session_response = await client.post(
+            "/api/sessions",
+            json={"title": "mention contract", "profile": "sisyphus-default", "scope": Scope().model_dump(mode="json")},
+        )
+        session_response.raise_for_status()
+        session_id = session_response.json()["session_id"]
+        body = {
+            **payload,
+            "mentions": ["hephaestus-deepworker", "prometheus-planner"],
+            "auto_approve": True,
+            "scope": Scope().model_dump(mode="json"),
+        }
+        if path_template == "/api/turns":
+            body["session_id"] = session_id
+        response = await client.post(path_template.format(session_id=session_id), json=body)
+
+    response.raise_for_status()
+    assert captured[0]["mentions"] == ["hephaestus-deepworker", "prometheus-planner"]
 
 
 @pytest.mark.asyncio

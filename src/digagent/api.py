@@ -28,6 +28,7 @@ class SessionTurnRequest(BaseModel):
     content: str
     profile: str = "sisyphus-default"
     auto_approve: bool | None = None
+    mentions: list[str] = Field(default_factory=list)
     title: str | None = None
     scope: Scope = Field(default_factory=Scope)
 
@@ -37,6 +38,7 @@ class CreateTurnRequest(BaseModel):
     profile: str = "sisyphus-default"
     session_id: str | None = None
     auto_approve: bool | None = None
+    mentions: list[str] = Field(default_factory=list)
     title: str | None = None
     scope: Scope = Field(default_factory=Scope)
 
@@ -108,6 +110,12 @@ def create_app(manager: TurnManager | None = None) -> FastAPI:
         if result.turn_id:
             payload["turn"] = serialize_turn(manager.get_turn(result.turn_id))
         return payload
+
+    async def run_turn_request(**kwargs):
+        try:
+            return await manager.handle_message(**kwargs)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     def parse_event_types(raw_value: str | None) -> set[str] | None:
         if not raw_value:
@@ -195,12 +203,13 @@ def create_app(manager: TurnManager | None = None) -> FastAPI:
     @app.post("/api/sessions/{session_id}/turns")
     async def post_session_turn(session_id: str, body: SessionTurnRequest):
         require_supported_session(session_id)
-        session, result = await manager.handle_message(
+        session, result = await run_turn_request(
             session_id=session_id,
             content=body.content,
             profile_name=body.profile,
             scope=body.scope,
             auto_approve=bool(body.auto_approve),
+            mentions=body.mentions,
             title=body.title,
         )
         return serialize_turn_result(session, result)
@@ -232,12 +241,13 @@ def create_app(manager: TurnManager | None = None) -> FastAPI:
                 title_source=SessionTitleSource.SEED if is_seed_title(title) else SessionTitleSource.MANUAL,
             )
             session_id = session.session_id
-        session, result = await manager.handle_message(
+        session, result = await run_turn_request(
             session_id=session_id,
             content=body.task,
             profile_name=body.profile,
             scope=body.scope,
             auto_approve=bool(body.auto_approve),
+            mentions=body.mentions,
             title=body.title,
         )
         return serialize_turn_result(session, result)
@@ -284,12 +294,13 @@ def create_app(manager: TurnManager | None = None) -> FastAPI:
     @app.post("/api/sessions/{session_id}/messages")
     async def post_session_message_alias(session_id: str, body: SessionTurnRequest):
         require_supported_session(session_id)
-        session, result = await manager.handle_message(
+        session, result = await run_turn_request(
             session_id=session_id,
             content=body.content,
             profile_name=body.profile,
             scope=body.scope,
             auto_approve=bool(body.auto_approve),
+            mentions=body.mentions,
             title=body.title,
         )
         return serialize_turn_result(session, result)

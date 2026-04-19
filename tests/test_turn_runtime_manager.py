@@ -51,6 +51,7 @@ async def test_handle_message_persists_turn_and_events(manager, monkeypatch) -> 
     assert turn.trigger_message_id == messages[0].message_id
     assert result.assistant_message == "reply:hello"
     assert [message.turn_id for message in messages] == [turn.turn_id, turn.turn_id]
+    assert [message.speaker_profile for message in messages] == ["user", "sisyphus-default"]
     assert [event.type for event in manager.load_turn_event_history(turn.turn_id)] == [
         "turn_started",
         "langgraph_updates",
@@ -107,6 +108,70 @@ async def test_approve_resumes_pending_turn(manager, monkeypatch) -> None:
     assert approval.status == "approved"
     assert turn.status == "completed"
     assert any(event.type == "approval_resolved" for event in manager.load_turn_event_history(turn.turn_id))
+
+
+@pytest.mark.asyncio
+async def test_handle_message_routes_mentions_in_serial_order(manager, monkeypatch) -> None:
+    profile_agents = {
+        "hephaestus-deepworker": FakeAgent(name="hephaestus-deepworker", reply_prefix="hephaestus"),
+        "prometheus-planner": FakeAgent(name="prometheus-planner", reply_prefix="prometheus"),
+        "sisyphus-default": FakeAgent(name="sisyphus-default", reply_prefix="sisyphus"),
+    }
+    monkeypatch.setattr(
+        "digagent.deepagents_runtime.session_ops.build_runtime",
+        fake_runtime_factory(lambda **kwargs: profile_agents[kwargs["profile_name"]]),
+    )
+    session = manager.create_session("mention-turn", "sisyphus-default", Scope())
+    _, result = await manager.handle_message(
+        session_id=session.session_id,
+        content="inspect chain",
+        profile_name="sisyphus-default",
+        mentions=["hephaestus-deepworker", "prometheus-planner"],
+        scope=Scope(),
+        auto_approve=True,
+    )
+
+    turn = manager.get_turn(result.turn_id)
+    messages = manager.list_messages(session.session_id)
+    assistant_messages = [message for message in messages if message.role == "assistant"]
+    events = manager.load_turn_event_history(turn.turn_id)
+
+    assert turn.profile_name == "hephaestus-deepworker"
+    assert turn.addressed_participants == ["hephaestus-deepworker", "prometheus-planner"]
+    assert turn.participant_profile == "prometheus-planner"
+    assert [message.speaker_profile for message in assistant_messages] == ["hephaestus-deepworker", "prometheus-planner"]
+    assert result.assistant_message == assistant_messages[-1].content
+    assert profile_agents["hephaestus-deepworker"].calls[0]["message"] == "inspect chain"
+    assert "Prior participant outputs" in profile_agents["prometheus-planner"].calls[0]["message"]
+    assert any(
+        item.type == "participant_handoff"
+        and item.data["handoff_from"] == "sisyphus-default"
+        and item.data["handoff_to"] == "hephaestus-deepworker"
+        for item in events
+    )
+    assert any(
+        item.type == "participant_handoff"
+        and item.data["handoff_from"] == "hephaestus-deepworker"
+        and item.data["handoff_to"] == "prometheus-planner"
+        for item in events
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_message_rejects_unknown_mentions(manager) -> None:
+    session = manager.create_session("mention-error", "sisyphus-default", Scope())
+
+    with pytest.raises(ValueError, match="Unknown mentioned agent"):
+        await manager.handle_message(
+            session_id=session.session_id,
+            content="inspect chain",
+            profile_name="sisyphus-default",
+            mentions=["unknown-agent"],
+            scope=Scope(),
+            auto_approve=True,
+        )
+
+    assert manager.storage.load_session(session.session_id).turn_ids == []
 
 
 @pytest.mark.asyncio

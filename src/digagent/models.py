@@ -543,6 +543,11 @@ class MessageRecord(DigAgentModel):
     role: MessageRole
     sender: str
     content: str
+    speaker_profile: str | None = None
+    addressed_participants: list[str] = Field(default_factory=list)
+    participant_profile: str | None = None
+    handoff_from: str | None = None
+    handoff_to: str | None = None
     artifact_refs: list[str] = Field(default_factory=list)
     evidence_refs: list[str] = Field(default_factory=list)
     created_at: str
@@ -567,6 +572,11 @@ class SessionRecord(DigAgentModel):
     pending_user_question: str | None = None
     conversation_summary: str | None = None
     last_intent_type: str | None = None
+    speaker_profile: str | None = None
+    addressed_participants: list[str] = Field(default_factory=list)
+    participant_profile: str | None = None
+    handoff_from: str | None = None
+    handoff_to: str | None = None
     last_user_message_id: str | None = None
     last_agent_message_id: str | None = None
     last_message_preview: str | None = None
@@ -587,6 +597,11 @@ class SessionSummary(DigAgentModel):
     updated_at: str
     active_turn_id: str | None = None
     pending_approval_count: int = 0
+    speaker_profile: str | None = None
+    addressed_participants: list[str] = Field(default_factory=list)
+    participant_profile: str | None = None
+    handoff_from: str | None = None
+    handoff_to: str | None = None
     last_message_preview: str | None = None
     latest_report_id: str | None = None
 
@@ -859,6 +874,11 @@ class TurnRecord(DigAgentModel):
     auto_approve: bool = False
     intent_profile: IntentProfile | None = None
     user_task: str
+    speaker_profile: str | None = None
+    addressed_participants: list[str] = Field(default_factory=list)
+    participant_profile: str | None = None
+    handoff_from: str | None = None
+    handoff_to: str | None = None
     scope: Scope = Field(default_factory=Scope)
     task_graph: TaskGraph | None = None
     pending_actions: list[str] = Field(default_factory=list)
@@ -890,6 +910,11 @@ class TurnEvent(DigAgentModel):
     turn_id: str | None = None
     type: str
     data: dict[str, Any]
+    speaker_profile: str | None = None
+    addressed_participants: list[str] = Field(default_factory=list)
+    participant_profile: str | None = None
+    handoff_from: str | None = None
+    handoff_to: str | None = None
     created_at: str
 
 
@@ -910,6 +935,11 @@ class UserTurnResult(DigAgentModel):
     turn_id: str | None = None
     message_id: str | None = None
     assistant_message: str | None = None
+    speaker_profile: str | None = None
+    addressed_participants: list[str] = Field(default_factory=list)
+    participant_profile: str | None = None
+    handoff_from: str | None = None
+    handoff_to: str | None = None
     approval_ids: list[str] = Field(default_factory=list)
     ignored_intents: list[str] = Field(default_factory=list)
     reason: str | None = None

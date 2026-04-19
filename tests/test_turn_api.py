@@ -65,6 +65,79 @@ async def test_create_turn_endpoint_creates_session_when_missing(test_settings, 
 
 
 @pytest.mark.asyncio
+async def test_session_message_endpoint_routes_mentions_into_profile_and_events(test_settings, monkeypatch, runtime_modules) -> None:
+    turn_manager, create_app = runtime_modules
+    agent = FakeAgent()
+    monkeypatch.setattr("digagent.deepagents_runtime.session_ops.build_runtime", fake_runtime_factory(agent))
+    app = create_app(turn_manager(test_settings))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        session = (
+            await client.post(
+                "/api/sessions",
+                json={"title": "mentions", "profile": "sisyphus-default", "scope": Scope().model_dump(mode="json")},
+            )
+        ).json()
+        created = await client.post(
+            f"/api/sessions/{session['session_id']}/messages",
+            json={
+                "content": "@hephaestus-deepworker 检查页面",
+                "profile": "sisyphus-default",
+                "mentions": ["hephaestus-deepworker", "prometheus-planner"],
+                "auto_approve": True,
+                "scope": Scope().model_dump(mode="json"),
+            },
+        )
+        created.raise_for_status()
+        payload = created.json()
+        messages = await client.get(f"/api/sessions/{session['session_id']}/messages")
+        messages.raise_for_status()
+        events = await client.get(f"/api/sessions/{session['session_id']}/events?history_only=true")
+        events.raise_for_status()
+
+    history = parse_sse_events(events.text)
+    assert payload["turn"]["profile_name"] == "hephaestus-deepworker"
+    assert payload["turn"]["addressed_participants"] == ["hephaestus-deepworker", "prometheus-planner"]
+    assert messages.json()[0]["addressed_participants"] == ["hephaestus-deepworker", "prometheus-planner"]
+    assert any(
+        item["type"] == "participant_handoff"
+        and item["data"]["handoff_to"] == "hephaestus-deepworker"
+        for item in history
+    )
+    assert any(
+        item["type"] == "assistant_message"
+        and item["data"]["speaker_profile"] == "hephaestus-deepworker"
+        for item in history
+    )
+
+
+@pytest.mark.asyncio
+async def test_session_message_endpoint_rejects_unknown_mentions(test_settings, runtime_modules) -> None:
+    turn_manager, create_app = runtime_modules
+    manager = turn_manager(test_settings)
+    app = create_app(manager)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        session = (
+            await client.post(
+                "/api/sessions",
+                json={"title": "mentions", "profile": "sisyphus-default", "scope": Scope().model_dump(mode="json")},
+            )
+        ).json()
+        response = await client.post(
+            f"/api/sessions/{session['session_id']}/messages",
+            json={
+                "content": "@unknown-agent 检查页面",
+                "profile": "sisyphus-default",
+                "mentions": ["unknown-agent"],
+                "auto_approve": True,
+                "scope": Scope().model_dump(mode="json"),
+            },
+        )
+
+    assert response.status_code == 400
+    assert "Unknown mentioned agent" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_session_snapshot_omits_turn_task_graph(test_settings, runtime_modules) -> None:
     turn_manager, create_app = runtime_modules
     manager = turn_manager(test_settings)

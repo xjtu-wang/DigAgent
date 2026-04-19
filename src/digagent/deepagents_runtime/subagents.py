@@ -7,11 +7,10 @@ from langchain_openai import ChatOpenAI
 
 from digagent.config import AppSettings, get_settings, load_profiles
 
-DEFAULT_SUBAGENT_PROFILES = (
-    "hephaestus-deepworker",
-    "memory-curator",
-    "report-writer",
-)
+
+def configured_agent_profiles(settings: AppSettings | None = None) -> tuple[str, ...]:
+    resolved = settings or get_settings()
+    return tuple(sorted(load_profiles(resolved)))
 
 
 def build_subagents(
@@ -24,10 +23,9 @@ def build_subagents(
     resolved = settings or get_settings()
     profiles = load_profiles(resolved)
     specs: list[SubAgent] = []
-    for name in DEFAULT_SUBAGENT_PROFILES:
-        if name == root_profile_name or name not in profiles:
+    for name, profile in profiles.items():
+        if name == root_profile_name:
             continue
-        profile = profiles[name]
         spec: SubAgent = {
             "name": name,
             "description": profile.description,
