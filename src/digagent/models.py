@@ -754,10 +754,19 @@ class AgentProfile(DigAgentModel):
 class ToolManifest(DigAgentModel):
     name: str
     description: str
-    action_type: ActionType = ActionType.TOOL
+    path: str | None = None
+    version: int | None = None
+    entry: str
+    args_schema: dict[str, Any] = Field(default_factory=dict)
+    output_schema: dict[str, Any] = Field(default_factory=dict)
     risk_tags: list[str] = Field(default_factory=list)
-    default_targets: ActionTargets = Field(default_factory=ActionTargets)
-    executor_adapter: str
+    timeout_sec: int | None = None
+    env_policy: str = "inherit"
+    working_dir: str | None = None
+    interrupt_on_call: bool = False
+    memory_hooks: dict[str, Any] = Field(default_factory=dict)
+    report_hooks: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class PluginCommandManifest(DigAgentModel):

@@ -7,10 +7,12 @@ from digagent.config import current_env_summary, load_profiles
 from digagent.deepagents_runtime.factory import build_runtime
 from digagent.deepagents_runtime.mcp import list_mcp_server_names
 from digagent.deepagents_runtime.memory import memory_source_paths
+from digagent.deepagents_runtime.project_tools import project_tool_catalog
 from digagent.deepagents_runtime.skills import skill_source_paths
 from digagent.deepagents_runtime.state import SessionRuntimeHandle
 from digagent.deepagents_runtime.turns import POLL_INTERVAL_SEC, TERMINAL_TURN_STATUSES, load_session_events, load_turn_events
 from digagent.models import ApprovalStatus, MessageRecord, Scope, SessionPermissionOverrides, SessionRecord, TurnEvent, TurnRecord, TurnStatus
+from digagent.plugins import PluginCatalog
 
 
 class TurnManagerSessionMixin:
@@ -23,9 +25,12 @@ class TurnManagerSessionMixin:
                 {"name": item.name, "description": item.description, "model": item.model or self.settings.model}
                 for item in profiles.values()
             ],
+            "tools": project_tool_catalog(self.settings),
             "skills": skill_source_paths(self.settings),
             "memory": memory_source_paths(self.settings),
+            "plugins": PluginCatalog(self.settings).catalog(),
             "mcp_servers": list_mcp_server_names(self.settings),
+            "cve": self.cve_status(),
         }
 
     def create_session(self, title: str, profile_name: str, scope: Scope) -> SessionRecord:

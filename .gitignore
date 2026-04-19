@@ -11,9 +11,10 @@ data/artifacts/blob/
 data/sessions/*/runs/
 .vscode
 .venv
-CTF-Sandbox-Orchestrator
+/CTF-Sandbox-Orchestrator/
+!data/plugins/ctf-sandbox-orchestrator/
+!data/plugins/ctf-sandbox-orchestrator/**
 .codex
 .claude
 .env
 AGENTS.md
-

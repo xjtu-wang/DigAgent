@@ -1,0 +1,40 @@
+name: report_export
+description: Export an existing DigAgent report as markdown or pdf and return the artifact path.
+version: 1
+entry: report_export
+args_schema:
+  type: object
+  properties:
+    report_id:
+      type: string
+    format:
+      type: string
+      enum: [markdown, pdf]
+    include_content:
+      type: boolean
+  required: [report_id]
+output_schema:
+  type: object
+  properties:
+    report_id:
+      type: string
+    format:
+      type: string
+    path:
+      type: string
+    title:
+      type: string
+    kind:
+      type: string
+    content:
+      type: string
+risk_tags:
+  - export_sensitive
+timeout_sec: 30
+env_policy: inherit
+working_dir: .
+interrupt_on_call: true
+memory_hooks: {}
+report_hooks:
+  kind: export
+metadata: {}

@@ -6,36 +6,29 @@ from digagent.config import AppSettings, get_settings
 
 from ._paths import ensure_text_file, to_backend_path
 
-PROJECT_MEMORY_CONTENT = """# DigAgent Project Memory
+PROJECT_MEMORY_FILES = {
+    "project.md": """# DigAgent Project Memory
 
-- This file is loaded through deepagents `memory=[...]`.
-- Keep durable project conventions and user-approved preferences here.
-- Do not store secrets, tokens, or transient chat noise here.
+- DigAgent packages project-facing runtime capabilities through `/.agents/skills`, `/.agents/tools`, and `/.agents/memory`.
+- Temporary memory stays with session records for interruption recovery and should only be promoted here when it becomes durable.
+- Project-specific capabilities should prefer manifest-backed tools instead of ad hoc shell glue.
 """
-
-SESSION_MEMORY_TEMPLATE = "session-{session_id}.md"
-TURN_MEMORY_TEMPLATE = "turn-{turn_id}.md"
+}
 
 
-def project_agents_path(settings: AppSettings | None = None) -> Path:
+def project_memory_root(settings: AppSettings | None = None) -> Path:
     resolved = settings or get_settings()
-    return resolved.workspace_root / ".deepagents" / "AGENTS.md"
+    return resolved.workspace_root / ".agents" / "memory"
 
 
-def session_memory_path(session_id: str, settings: AppSettings | None = None) -> Path:
-    resolved = settings or get_settings()
-    return resolved.workspace_root / ".deepagents" / "memories" / SESSION_MEMORY_TEMPLATE.format(session_id=session_id)
-
-
-def turn_memory_path(turn_id: str, settings: AppSettings | None = None) -> Path:
-    resolved = settings or get_settings()
-    return resolved.workspace_root / ".deepagents" / "memories" / TURN_MEMORY_TEMPLATE.format(turn_id=turn_id)
-
-
-def ensure_project_memory(settings: AppSettings | None = None) -> Path:
-    path = project_agents_path(settings)
-    ensure_text_file(path, PROJECT_MEMORY_CONTENT)
-    return path
+def ensure_project_memory(settings: AppSettings | None = None) -> list[Path]:
+    root = project_memory_root(settings)
+    paths: list[Path] = []
+    for name, content in PROJECT_MEMORY_FILES.items():
+        path = root / name
+        ensure_text_file(path, content)
+        paths.append(path)
+    return paths
 
 
 def memory_source_paths(
@@ -46,12 +39,5 @@ def memory_source_paths(
 ) -> list[str]:
     resolved = settings or get_settings()
     ensure_project_memory(resolved)
-    candidates = [resolved.workspace_root / "AGENTS.md", project_agents_path(resolved)]
-    legacy_path = resolved.data_dir / "memory" / "MEMORY.md"
-    if legacy_path.exists():
-        candidates.append(legacy_path)
-    if session_id:
-        candidates.append(session_memory_path(session_id, resolved))
-    if turn_id:
-        candidates.append(turn_memory_path(turn_id, resolved))
+    candidates = sorted(project_memory_root(resolved).glob("*.md"))
     return [path for item in candidates if (path := to_backend_path(item, resolved))]

@@ -23,6 +23,24 @@ class HumanMessage:
     content: str
 
 
+class BaseTool:
+    name: str
+
+
+class StructuredTool:
+    @classmethod
+    def from_function(
+        cls,
+        func: Any = None,
+        coroutine: Any = None,
+        name: str | None = None,
+        description: str | None = None,
+        **_: Any,
+    ) -> Any:
+        tool_name = name or getattr(func, "__name__", getattr(coroutine, "__name__", "tool"))
+        return types.SimpleNamespace(name=tool_name, description=description, func=func, coroutine=coroutine)
+
+
 @dataclass
 class BuiltRuntime:
     agent: Any
@@ -64,6 +82,9 @@ def load_runtime_api(monkeypatch) -> tuple[type[Any], Any]:
 
     messages_module = types.ModuleType("langchain_core.messages")
     messages_module.HumanMessage = HumanMessage
+    tools_module = types.ModuleType("langchain_core.tools")
+    tools_module.BaseTool = BaseTool
+    tools_module.StructuredTool = StructuredTool
     types_module = types.ModuleType("langgraph.types")
     types_module.Command = Command
     types_module.Interrupt = Interrupt
@@ -71,8 +92,9 @@ def load_runtime_api(monkeypatch) -> tuple[type[Any], Any]:
     factory_module.BuiltRuntime = BuiltRuntime
     factory_module.build_runtime = _unexpected_build_runtime
 
-    monkeypatch.setitem(sys.modules, "langchain_core", _package("langchain_core", messages=messages_module))
+    monkeypatch.setitem(sys.modules, "langchain_core", _package("langchain_core", messages=messages_module, tools=tools_module))
     monkeypatch.setitem(sys.modules, "langchain_core.messages", messages_module)
+    monkeypatch.setitem(sys.modules, "langchain_core.tools", tools_module)
     monkeypatch.setitem(sys.modules, "langgraph", _package("langgraph", types=types_module))
     monkeypatch.setitem(sys.modules, "langgraph.types", types_module)
     monkeypatch.setitem(sys.modules, "digagent.deepagents_runtime.factory", factory_module)

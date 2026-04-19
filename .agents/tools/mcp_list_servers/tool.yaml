@@ -1,0 +1,19 @@
+name: mcp_list_servers
+description: List currently configured MCP server names.
+version: 1
+entry: mcp_list_servers
+args_schema:
+  type: object
+  properties: {}
+output_schema:
+  type: array
+  items:
+    type: string
+risk_tags: []
+timeout_sec: 15
+env_policy: inherit
+working_dir: .
+interrupt_on_call: false
+memory_hooks: {}
+report_hooks: {}
+metadata: {}

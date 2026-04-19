@@ -1,0 +1,29 @@
+name: mcp_call_tool
+description: Call a tool exposed by a configured MCP server.
+version: 1
+entry: mcp_call_tool
+args_schema:
+  type: object
+  properties:
+    server_name:
+      type: string
+    tool_name:
+      type: string
+    arguments:
+      type: object
+  required: [server_name, tool_name]
+output_schema:
+  type: object
+  properties:
+    content:
+      type: array
+      items:
+        type: object
+risk_tags: []
+timeout_sec: 60
+env_policy: inherit
+working_dir: .
+interrupt_on_call: true
+memory_hooks: {}
+report_hooks: {}
+metadata: {}

@@ -1,0 +1,29 @@
+name: vuln_kb_lookup
+description: Search the local CVE knowledge base by keyword, CVE ID, CWE, or product.
+version: 1
+entry: vuln_kb_lookup
+args_schema:
+  type: object
+  properties:
+    query:
+      type: string
+    cve_id:
+      type: string
+    cwe:
+      type: string
+    product:
+      type: string
+    limit:
+      type: integer
+output_schema:
+  type: array
+  items:
+    type: object
+risk_tags: []
+timeout_sec: 15
+env_policy: inherit
+working_dir: .
+interrupt_on_call: false
+memory_hooks: {}
+report_hooks: {}
+metadata: {}

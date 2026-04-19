@@ -1,0 +1,36 @@
+name: web_search
+description: Search the web using the configured provider and return normalized candidate URLs.
+version: 1
+entry: web_search
+args_schema:
+  type: object
+  properties:
+    query:
+      type: string
+    limit:
+      type: integer
+  required: [query]
+output_schema:
+  type: object
+  properties:
+    title:
+      type: string
+    summary:
+      type: string
+    raw_output:
+      type: string
+    facts:
+      type: array
+      items:
+        type: object
+    source:
+      type: object
+risk_tags:
+  - network
+timeout_sec: 15
+env_policy: inherit
+working_dir: .
+interrupt_on_call: false
+memory_hooks: {}
+report_hooks: {}
+metadata: {}

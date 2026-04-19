@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 import pytest
@@ -18,7 +17,6 @@ def test_settings(tmp_path: Path, repo_root: Path):
 
     data_dir = tmp_path / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(repo_root / "data" / "skills", data_dir / "skills")
     return AppSettings(
         OPENAI_API_KEY="test-key",
         BASE_URL="https://example.invalid/v1",

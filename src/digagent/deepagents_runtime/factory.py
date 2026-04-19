@@ -77,7 +77,7 @@ async def build_runtime(
         memory=memory_sources or None,
         subagents=build_subagents(tools, skill_sources, resolved, root_profile_name=profile_name),
         backend=backend,
-        interrupt_on=interrupt_on_config(overrides, auto_approve=auto_approve),
+        interrupt_on=interrupt_on_config(overrides, auto_approve=auto_approve, settings=resolved),
         checkpointer=checkpointer,
         name="digagent",
     )

@@ -1,0 +1,37 @@
+name: web_fetch
+description: Fetch a target URL with GET or HEAD and return normalized evidence fields.
+version: 1
+entry: web_fetch
+args_schema:
+  type: object
+  properties:
+    url:
+      type: string
+    method:
+      type: string
+      enum: [GET, HEAD]
+  required: [url]
+output_schema:
+  type: object
+  properties:
+    title:
+      type: string
+    summary:
+      type: string
+    raw_output:
+      type: string
+    facts:
+      type: array
+      items:
+        type: object
+    source:
+      type: object
+risk_tags:
+  - network
+timeout_sec: 15
+env_policy: inherit
+working_dir: .
+interrupt_on_call: false
+memory_hooks: {}
+report_hooks: {}
+metadata: {}
