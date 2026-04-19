@@ -337,7 +337,10 @@ export function useWorkspaceController(appSettings) {
   const currentTurnEvents = useMemo(() => currentTurn?.turn_id ? turnDetailsById[currentTurn.turn_id]?.events || [] : [], [currentTurn?.turn_id, turnDetailsById]);
   const events = useMemo(() => combineLoadedEvents(sessionEvents, turnDetailsById), [sessionEvents, turnDetailsById]);
   const running = requestPending || Boolean(activeTurn && !TERMINAL_TURN_STATUSES.has(activeTurn.status));
-  const primaryTimeline = useMemo(() => buildPrimaryTimeline(messages, events, turns, appSettings.chatPreferences.showKeySystemCards), [appSettings.chatPreferences.showKeySystemCards, events, messages, turns]);
+  const primaryTimeline = useMemo(() => buildPrimaryTimeline(messages, events, turns, {
+    showKeySystemCards: appSettings.chatPreferences.showKeySystemCards,
+    activeTurnId: activeTurn?.turn_id || null,
+  }), [activeTurn?.turn_id, appSettings.chatPreferences.showKeySystemCards, events, messages, turns]);
   const activityEvents = useMemo(() => filterActivityEvents(buildInspectorActivityEvents(currentTurnEvents, turns, messages, currentTurn?.turn_id)), [currentTurn?.turn_id, currentTurnEvents, turns, messages]);
   const filteredSessions = useMemo(() => {
     const keyword = sessionSearch.trim().toLowerCase();

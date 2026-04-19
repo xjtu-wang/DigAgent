@@ -1,11 +1,7 @@
 import { compactText } from "./chat-utils.js";
-import { buildTurnTimelineEntries } from "./turn-utils.js";
+import { buildConversationItems, KEY_SYSTEM_CONVERSATION_ITEM_TYPES, PRIMARY_CONVERSATION_ITEM_TYPES } from "./conversation-items.js";
 
-export const KEY_CHAT_EVENT_TYPES = new Set([
-  "approval_required",
-  "approval_expired",
-  "approval_superseded",
-]);
+export const KEY_CHAT_EVENT_TYPES = KEY_SYSTEM_CONVERSATION_ITEM_TYPES;
 
 export const SYSTEM_ACTIVITY_TYPES = new Set([
   "turn_recorded",
@@ -67,50 +63,14 @@ export const systemEventLabels = {
   turn_superseded: "执行已被替代",
 };
 
-const TYPE_ORDER = {
-  local_user: 0,
-  turn_card: 1,
-  approval_required: 2,
-  approval_superseded: 3,
-  approval_expired: 4,
-  assistant_message: 5,
-};
-
-function compareTimelineItems(left, right) {
-  const timeDelta = new Date(left.created_at || 0) - new Date(right.created_at || 0);
-  if (timeDelta !== 0) {
-    return timeDelta;
-  }
-  const leftWeight = TYPE_ORDER[left.type] ?? 10;
-  const rightWeight = TYPE_ORDER[right.type] ?? 10;
-  if (leftWeight !== rightWeight) {
-    return leftWeight - rightWeight;
-  }
-  return String(left.event_id || "").localeCompare(String(right.event_id || ""));
-}
-
 export function mergeHistory(messages, events, turns) {
-  const messageEntries = messages.map((message) => ({
-    event_id: `msg-${message.message_id}`,
-    session_id: message.session_id,
-    turn_id: message.turn_id,
-    type: message.role === "user" ? "local_user" : "assistant_message",
-    created_at: message.created_at,
-    data: {
-      message: message.content,
-      message_id: message.message_id,
-      evidence_refs: message.evidence_refs || [],
-      artifact_refs: message.artifact_refs || [],
-      turn_id: message.turn_id || null,
-    },
-  }));
-  const turnEntries = buildTurnTimelineEntries(turns, messages, events);
-  return [...messageEntries, ...turnEntries, ...events].sort(compareTimelineItems);
+  void turns;
+  return buildConversationItems(messages, events, true);
 }
 
 export function filterPrimaryTimeline(timeline, showKeySystemCards = true) {
   return timeline.filter((item) => {
-    if (item.type === "local_user" || item.type === "assistant_message" || item.type === "turn_card") {
+    if (PRIMARY_CONVERSATION_ITEM_TYPES.has(item.type) || item.type === "local_user") {
       return true;
     }
     return showKeySystemCards && KEY_CHAT_EVENT_TYPES.has(item.type);

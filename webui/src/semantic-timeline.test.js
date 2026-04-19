@@ -94,18 +94,33 @@ test("buildPrimaryTimeline emits a chat-style conversation flow", () => {
       created_at: "2026-04-17T10:00:05Z",
       data: { participant_profile: "hephaestus-deepworker", message: "页面结构没有异常。" },
     },
+    {
+      event_id: "evt-6",
+      session_id: "sess-1",
+      turn_id: "turn-1",
+      type: "approval_required",
+      created_at: "2026-04-17T10:00:05.500Z",
+      data: { approval_id: "apr-1", reason: "需要执行网络请求" },
+    },
   ];
 
   const timeline = buildPrimaryTimeline(messages, events, turns, true);
 
   assert.deepEqual(timeline.map((item) => item.type), [
-    "local_user",
-    "turn_card",
+    "user_message",
+    "assistant_process",
+    "tool_action",
+    "tool_observation",
+    "participant_handoff",
+    "participant_message",
+    "approval_required",
     "assistant_message",
   ]);
-  assert.equal(timeline[1].data.goal, "@hephaestus-deepworker 检查页面");
-  assert.equal(timeline[1].data.result_summary, "结论");
-  assert.equal(timeline[2].data.message, "结论");
+  assert.equal(timeline[1].data.detail, "先看页面。");
+  assert.equal(timeline[2].data.tool_name, "web_fetch");
+  assert.equal(timeline[3].data.source_host, "example.com");
+  assert.equal(timeline[6].data.approval_id, "apr-1");
+  assert.equal(timeline[7].data.message, "结论");
 });
 
 test("buildPrimaryTimeline hides approval and notice cards when disabled", () => {
@@ -128,5 +143,148 @@ test("buildPrimaryTimeline hides approval and notice cards when disabled", () =>
     false,
   );
 
-  assert.deepEqual(timeline.map((item) => item.type), ["local_user"]);
+  assert.deepEqual(timeline.map((item) => item.type), ["user_message"]);
+});
+
+test("buildPrimaryTimeline suppresses chunk-only duplicates after final assistant reply", () => {
+  const timeline = buildPrimaryTimeline(
+    [
+      {
+        message_id: "msg-user",
+        session_id: "sess-1",
+        turn_id: "turn-1",
+        role: "user",
+        content: "你好",
+        created_at: "2026-04-17T10:00:00Z",
+        evidence_refs: [],
+        artifact_refs: [],
+      },
+      {
+        message_id: "msg-assistant",
+        session_id: "sess-1",
+        turn_id: "turn-1",
+        role: "assistant",
+        content: "你好，我可以帮你分析问题。",
+        created_at: "2026-04-17T10:00:03Z",
+        evidence_refs: [],
+        artifact_refs: [],
+      },
+    ],
+    [
+      { event_id: "evt-1", session_id: "sess-1", turn_id: "turn-1", type: "assistant_chunk", created_at: "2026-04-17T10:00:01Z", data: { text: "你好，" } },
+      { event_id: "evt-2", session_id: "sess-1", turn_id: "turn-1", type: "assistant_chunk", created_at: "2026-04-17T10:00:02Z", data: { text: "我可以帮你分析问题。" } },
+    ],
+    [],
+    true,
+  );
+
+  assert.deepEqual(timeline.map((item) => item.type), ["user_message", "assistant_message"]);
+});
+
+test("buildPrimaryTimeline keeps live assistant process while turn is still active", () => {
+  const timeline = buildPrimaryTimeline(
+    [{
+      message_id: "msg-user",
+      session_id: "sess-1",
+      turn_id: "turn-1",
+      role: "user",
+      content: "继续",
+      created_at: "2026-04-17T10:00:00Z",
+      evidence_refs: [],
+      artifact_refs: [],
+    }],
+    [
+      { event_id: "evt-1", session_id: "sess-1", turn_id: "turn-1", type: "assistant_chunk", created_at: "2026-04-17T10:00:01Z", data: { text: "先整理上下文。" } },
+      { event_id: "evt-2", session_id: "sess-1", turn_id: "turn-1", type: "assistant_chunk", created_at: "2026-04-17T10:00:02Z", data: { text: "\n\n再" } },
+      { event_id: "evt-3", session_id: "sess-1", turn_id: "turn-1", type: "assistant_chunk", created_at: "2026-04-17T10:00:02Z", data: { text: "执行下一步。" } },
+    ],
+    [],
+    { showKeySystemCards: true, activeTurnId: "turn-1" },
+  );
+
+  assert.deepEqual(timeline.map((item) => item.type), ["user_message", "assistant_process", "assistant_process"]);
+  assert.equal(timeline[1].data.detail, "先整理上下文。");
+  assert.equal(timeline[2].data.detail, "再执行下一步。");
+});
+
+test("buildPrimaryTimeline keeps live assistant process merged across invisible same-second events", () => {
+  const timeline = buildPrimaryTimeline(
+    [{
+      message_id: "msg-user",
+      session_id: "sess-1",
+      turn_id: "turn-1",
+      role: "user",
+      content: "继续",
+      created_at: "2026-04-17T10:00:00Z",
+      evidence_refs: [],
+      artifact_refs: [],
+    }],
+    [
+      { event_id: "evt-1", session_id: "sess-1", turn_id: "turn-1", type: "assistant_chunk", created_at: "2026-04-17T10:00:01Z", data: { text: "先整理线索" } },
+      {
+        event_id: "evt-2",
+        session_id: "sess-1",
+        turn_id: "turn-1",
+        type: "langgraph_tasks",
+        created_at: "2026-04-17T10:00:01Z",
+        data: {
+          payload: {
+            name: "MemoryMiddleware.before_agent",
+            result: { messages: [] },
+          },
+        },
+      },
+      { event_id: "evt-3", session_id: "sess-1", turn_id: "turn-1", type: "assistant_chunk", created_at: "2026-04-17T10:00:01Z", data: { text: "，确认入口。" } },
+    ],
+    [],
+    { showKeySystemCards: true, activeTurnId: "turn-1" },
+  );
+
+  assert.deepEqual(timeline.map((item) => item.type), ["user_message", "assistant_process"]);
+  assert.equal(timeline[1].data.detail, "先整理线索，确认入口。");
+});
+
+test("buildPrimaryTimeline keeps tool action ahead of matching observation for same-second events", () => {
+  const timeline = buildPrimaryTimeline(
+    [],
+    [
+      {
+        event_id: "evt-action",
+        session_id: "sess-1",
+        turn_id: "turn-1",
+        type: "langgraph_tasks",
+        created_at: "2026-04-17T10:00:02Z",
+        data: {
+          payload: {
+            name: "model",
+            result: {
+              messages: [{
+                content: "执行命令",
+                tool_calls: [{ id: "call-1", name: "execute", args: { command: "id" } }],
+              }],
+            },
+          },
+        },
+      },
+      {
+        event_id: "evt-observation",
+        session_id: "sess-1",
+        turn_id: "turn-1",
+        type: "tool_result",
+        created_at: "2026-04-17T10:00:02Z",
+        data: {
+          tool_call_id: "call-1",
+          tool_name: "execute",
+          summary: "命令执行成功",
+          detail: "<no output>",
+        },
+      },
+    ],
+    [],
+    true,
+  );
+
+  assert.deepEqual(timeline.map((item) => item.type), ["tool_action", "tool_observation"]);
+  assert.equal(timeline[0].data.tool_call_id, "call-1");
+  assert.equal(timeline[1].data.tool_call_id, "call-1");
 });

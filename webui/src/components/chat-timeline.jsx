@@ -29,7 +29,7 @@ function TimelineItem(props) {
       />
     );
   }
-  if (item.type === "assistant_thought") {
+  if (item.type === "assistant_process" || item.type === "assistant_thought") {
     return <ThoughtItem item={item} />;
   }
   if (item.type === "tool_action") {
