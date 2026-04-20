@@ -3,7 +3,6 @@ const EMPTY_CATALOG = Object.freeze({
   tools: [],
   skills: [],
   mcp_servers: [],
-  cve: { status: "idle" },
 });
 
 function normalizeArray(value) {
@@ -11,10 +10,7 @@ function normalizeArray(value) {
 }
 
 export function defaultCatalog() {
-  return {
-    ...EMPTY_CATALOG,
-    cve: { ...EMPTY_CATALOG.cve },
-  };
+  return { ...EMPTY_CATALOG };
 }
 
 export function normalizeCatalog(value) {
@@ -29,8 +25,5 @@ export function normalizeCatalog(value) {
     tools: normalizeArray(value.tools),
     skills: normalizeArray(value.skills),
     mcp_servers: normalizeArray(value.mcp_servers),
-    cve: value.cve && typeof value.cve === "object" && !Array.isArray(value.cve)
-      ? { ...defaults.cve, ...value.cve }
-      : defaults.cve,
   };
 }

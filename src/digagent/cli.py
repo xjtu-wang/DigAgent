@@ -144,43 +144,6 @@ def serve(
     uvicorn.run(create_app(), host=host, port=port, log_level="info")
 
 
-@app.command("cve-sync")
-def cve_sync(
-    max_records: int = typer.Option(200, "--max-records", min=1, help="Limit records for the current sync run."),
-) -> None:
-    async def runner() -> None:
-        manager = TurnManager()
-        payload = await manager.sync_cve(max_records=max_records)
-        console.print_json(data=payload)
-
-    asyncio.run(runner())
-
-
-@app.command("cve-status")
-def cve_status() -> None:
-    manager = TurnManager()
-    console.print_json(data=manager.cve_status())
-
-
-@app.command("cve-search")
-def cve_search(
-    query: str = typer.Option("", "--query"),
-    cve_id: str = typer.Option("", "--cve-id"),
-    cwe: str = typer.Option("", "--cwe"),
-    product: str = typer.Option("", "--product"),
-    limit: int = typer.Option(10, "--limit", min=1, max=100),
-) -> None:
-    manager = TurnManager()
-    payload = manager.search_cve(
-        query=query,
-        cve_id=cve_id or None,
-        cwe=cwe or None,
-        product=product or None,
-        limit=limit,
-    )
-    console.print_json(data={"items": payload, "state": manager.cve_status()})
-
-
 @app.command("tools-doctor")
 def tools_doctor(
     query: str = typer.Option("example", "--query", help="web_search smoke query"),

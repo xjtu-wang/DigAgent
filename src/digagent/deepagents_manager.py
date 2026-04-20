@@ -8,7 +8,6 @@ from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 
 from digagent.config import AppSettings, get_settings, load_profiles
-from digagent.cve import CveKnowledgeBase
 from digagent.deepagents_runtime import session_ops as session_ops_module
 from digagent.deepagents_runtime.manager_ops import TurnManagerOpsMixin
 from digagent.deepagents_runtime.state import SessionRuntimeHandle, extract_assistant_text, extract_text_chunk
@@ -43,7 +42,6 @@ class TurnManager(TurnManagerOpsMixin):
     def __init__(self, settings: AppSettings | None = None) -> None:
         self.settings = settings or get_settings()
         self.storage = FileStorage(self.settings)
-        self.knowledge_base = CveKnowledgeBase(self.settings, self.storage)
         self._runtimes: dict[str, Any] = {}
         self._pending_approvals: dict[str, Any] = {}
         self._title_tasks: dict[str, asyncio.Task[None]] = {}

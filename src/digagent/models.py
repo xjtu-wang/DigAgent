@@ -832,15 +832,21 @@ class CVERecord(DigAgentModel):
     cvss: dict[str, Any] = Field(default_factory=dict)
     references: list[dict[str, Any]] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)
+    kev: bool = False
+    kev_date_added: str | None = None
+    kev_due_date: str | None = None
+    known_ransomware_campaign_use: str | None = None
+    source: str = "nvd"
     source_hash: str
 
 
 class CveSyncState(DigAgentModel):
     status: str = "idle"
-    source: str = "nvd"
+    source: str = "nvd+kev"
     base_url: str = "https://services.nvd.nist.gov/rest/json/cves/2.0"
     total_records: int = 0
     normalized_records: int = 0
+    kev_records: int = 0
     last_synced_at: str | None = None
     last_error: str | None = None
     last_source_hash: str | None = None

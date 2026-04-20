@@ -9,25 +9,24 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-import yaml
 from langchain_core.tools import StructuredTool
 from pydantic import Field, create_model
 
 from digagent.config import AppSettings, get_settings
-from digagent.cve import CveKnowledgeBase
+from digagent.cve_service import CveService
 from digagent.models import ToolManifest
 from digagent.report.exporter import ReportExporter
 from digagent.storage import FileStorage
 from digagent.toolsets.network import NetworkToolset
 
-from ._paths import to_backend_path
+from .capability_catalog import load_tool_manifests
 from .tool_policy import RuntimeToolBinding
 
 
 @dataclass(frozen=True)
 class ProjectToolContext:
     settings: AppSettings
-    knowledge_base: CveKnowledgeBase
+    cve_service: CveService
     storage: FileStorage
     network: NetworkToolset
     report_exporter: ReportExporter
@@ -88,16 +87,7 @@ def project_tools_root(settings: AppSettings | None = None) -> Path:
 
 
 def load_project_tool_manifests(settings: AppSettings | None = None) -> list[ToolManifest]:
-    resolved = settings or get_settings()
-    root = project_tools_root(resolved)
-    if not root.exists():
-        return []
-    manifests: list[ToolManifest] = []
-    for path in sorted(root.glob("*/tool.yaml")):
-        payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        manifest = ToolManifest.model_validate(payload)
-        manifests.append(manifest.model_copy(update={"path": to_backend_path(path.parent, resolved) or str(path.parent)}))
-    return manifests
+    return load_tool_manifests(settings)
 
 
 def project_tool_catalog(settings: AppSettings | None = None) -> list[dict[str, Any]]:
@@ -112,7 +102,7 @@ def build_project_tools(
     resolved = settings or get_settings()
     context = ProjectToolContext(
         settings=resolved,
-        knowledge_base=CveKnowledgeBase(resolved),
+        cve_service=CveService(resolved),
         storage=FileStorage(resolved),
         network=NetworkToolset(resolved),
         report_exporter=ReportExporter(resolved),

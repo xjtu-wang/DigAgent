@@ -1,5 +1,5 @@
-name: vuln_kb_lookup
-description: Search the local CVE knowledge base by keyword, CVE ID, CWE, or product.
+name: cve_search_local
+description: Search cached CVE and KEV intelligence from the local store.
 version: 1
 function: run
 args_schema:

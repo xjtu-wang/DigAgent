@@ -20,6 +20,9 @@ tool_allowlist:
   - web_search
   - web_fetch
   - shell_exec
+  - cve_search_local
+  - cve_fetch_online
+  - cve_sync_sources
   - report_export
   - vuln_kb_lookup
   - ctf_orchestrator_inventory

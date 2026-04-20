@@ -1,0 +1,46 @@
+name: cve_fetch_online
+description: Query live CVE intelligence from NVD, enrich it with KEV status, and cache the results locally.
+version: 1
+function: run
+args_schema:
+  type: object
+  properties:
+    query:
+      type: string
+    cve_id:
+      type: string
+    cwe:
+      type: string
+    product:
+      type: string
+    kev_only:
+      type: boolean
+    limit:
+      type: integer
+    modified_within_days:
+      type: integer
+    published_within_days:
+      type: integer
+    include_history:
+      type: boolean
+output_schema:
+  type: object
+  properties:
+    items:
+      type: array
+      items:
+        type: object
+    history:
+      type: array
+      items:
+        type: object
+    state:
+      type: object
+risk_tags:
+  - network
+timeout_sec: 60
+env_policy: inherit
+working_dir: .
+interrupt_on_call: false
+memory_hooks: {}
+report_hooks: {}

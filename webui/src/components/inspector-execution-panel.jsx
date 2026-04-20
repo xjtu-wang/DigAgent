@@ -1,10 +1,8 @@
 import React, { useMemo } from "react";
-import { RefreshCw, Search } from "lucide-react";
 import { compactText, formatTime } from "../chat-utils";
 import { buildTurnInspectorStats } from "../inspector-store";
 import { turnGoal, turnTargetSummary } from "../turn-utils";
 import { StatusPill } from "./status-pill";
-import { Badge, Button, Input } from "./ui";
 
 export function ExecutionPanel({ activityEvents, currentTurn, messages, onSelectTurn, planGraph, turns }) {
   const stats = useMemo(() => buildTurnInspectorStats(currentTurn, messages, activityEvents, planGraph), [activityEvents, currentTurn, messages, planGraph]);
@@ -68,42 +66,5 @@ export function ExecutionPanel({ activityEvents, currentTurn, messages, onSelect
         </div>
       </section>
     </div>
-  );
-}
-
-export function KnowledgeBasePanel({ cveQuery, cveResults, cveStatus, onSearchCve, onSyncCve, setCveQuery }) {
-  return (
-    <section className="rounded-[1.8rem] border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-sm font-medium text-slate-900">漏洞知识库</div>
-        <StatusPill status={cveStatus.status || "idle"} />
-      </div>
-      <div className="mt-4 flex gap-2">
-        <Button variant="secondary" size="sm" onClick={onSyncCve}>
-          <RefreshCw size={14} className="mr-2" />
-          同步 NVD
-        </Button>
-        <div className="text-xs text-slate-500">records: {cveStatus.normalized_records || 0}</div>
-      </div>
-      <div className="mt-4 flex gap-2">
-        <Input value={cveQuery} onChange={(event) => setCveQuery(event.target.value)} placeholder="搜索 CVE / CWE / product" />
-        <Button variant="secondary" onClick={onSearchCve}>
-          <Search size={14} />
-        </Button>
-      </div>
-      {cveResults.length ? (
-        <div className="mt-4 grid gap-2">
-          {cveResults.slice(0, 4).map((item) => (
-            <div key={item.cve_id} className="rounded-[1.4rem] bg-slate-50 p-3 text-sm text-slate-700">
-              <div className="flex items-center justify-between gap-2">
-                <div className="font-medium text-slate-900">{item.cve_id}</div>
-                {item.severity ? <Badge className="bg-white">{item.severity}</Badge> : null}
-              </div>
-              <div className="mt-1 text-xs text-slate-500">{compactText((item.descriptions || []).join(" "), 120)}</div>
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </section>
   );
 }

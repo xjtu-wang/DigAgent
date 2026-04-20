@@ -316,9 +316,6 @@ export function useWorkspaceController(appSettings) {
   const [openEvidenceIds, setOpenEvidenceIds] = useState(new Set());
   const [reportsById, setReportsById] = useState({});
   const [openReportIds, setOpenReportIds] = useState(new Set());
-  const [cveStatus, setCveStatus] = useState({ status: "idle" });
-  const [cveQuery, setCveQuery] = useState("");
-  const [cveResults, setCveResults] = useState([]);
   const [resolvingApprovalIds, setResolvingApprovalIds] = useState(() => new Set());
   const [permissionOverrides, setPermissionOverrides] = useState(() => emptyOverrides());
   const [requestPending, setRequestPending] = useState(false);
@@ -560,7 +557,6 @@ export function useWorkspaceController(appSettings) {
           });
         }
       }
-      if (payload.type === "cve_sync_updated") setCveStatus(payload.data);
       if (payload.type === "session_permissions_updated") setPermissionOverrides(normalizePermissionOverrides(payload.data));
       if (payload.data?.report_id) await loadReport(payload.data.report_id);
       if (shouldRefreshSession(payload)) await hydrateSession(payload.session_id || session.session_id);
@@ -770,21 +766,6 @@ export function useWorkspaceController(appSettings) {
     }
   }
 
-  async function syncCve() {
-    setCveStatus((current) => ({ ...current, status: "running", running: true }));
-    const response = await fetch("/api/cve/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ max_records: 200 }) });
-    const payload = await response.json().catch(() => ({}));
-    setCveStatus(response.ok ? payload : { ...cveStatus, status: "failed", running: false, last_error: payload.detail || "sync failed" });
-  }
-
-  async function searchCve() {
-    const response = await fetch(`/api/cve/search?query=${encodeURIComponent(cveQuery)}`);
-    ensureOk(response, "CVE 搜索失败");
-    const payload = await response.json();
-    setCveResults(payload.items || []);
-    setCveStatus(payload.state || cveStatus);
-  }
-
   function startFreshSession() {
     resetSessionView();
     setTask("");
@@ -797,9 +778,6 @@ export function useWorkspaceController(appSettings) {
     canDeleteCurrentSession,
     cancelCurrentTurn,
     currentTurn,
-    cveQuery,
-    cveResults,
-    cveStatus,
     deleteSessionById,
     downloadReport: (reportId, format) => window.open(`/api/reports/${reportId}/download?format=${format}`, "_blank"),
     evidenceState,
@@ -817,7 +795,6 @@ export function useWorkspaceController(appSettings) {
     running,
     runtimeDraft,
     savePermissionOverrides,
-    searchCve,
     selectTurn: setFocusedTurnId,
     selectedGraphNode,
     selectedNodeId,
@@ -825,7 +802,6 @@ export function useWorkspaceController(appSettings) {
     sessionGroups,
     sessionSearch,
     sendMessage,
-    setCveQuery,
     setPermissionOverrides,
     setRuntimeDraft,
     setSelectedNodeId,
@@ -834,7 +810,6 @@ export function useWorkspaceController(appSettings) {
     startFreshSession,
     supersededApprovalIds,
     supersededApprovals,
-    syncCve,
     task,
     toggleArchive,
     toggleEvidence,

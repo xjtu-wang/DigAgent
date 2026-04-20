@@ -6,19 +6,18 @@ test("defaultCatalog exposes arrays expected by UI", () => {
   const catalog = defaultCatalog();
   assert.deepEqual(catalog.profiles, []);
   assert.deepEqual(catalog.tools, []);
+  assert.deepEqual(catalog.skills, []);
   assert.deepEqual(catalog.mcp_servers, []);
-  assert.deepEqual(catalog.cve, { status: "idle" });
 });
 
 test("normalizeCatalog keeps UI-safe defaults when backend omits profiles", () => {
   const catalog = normalizeCatalog({
     framework: "deepagents",
-    skills: ["skill-a"],
-    mcp_servers: ["playwright-local"],
+    skills: [{ name: "skill-a" }],
+    mcp_servers: [{ server_id: "playwright-local" }],
   });
   assert.deepEqual(catalog.profiles, []);
   assert.deepEqual(catalog.tools, []);
-  assert.deepEqual(catalog.skills, ["skill-a"]);
-  assert.deepEqual(catalog.mcp_servers, ["playwright-local"]);
-  assert.deepEqual(catalog.cve, { status: "idle" });
+  assert.deepEqual(catalog.skills, [{ name: "skill-a" }]);
+  assert.deepEqual(catalog.mcp_servers, [{ server_id: "playwright-local" }]);
 });

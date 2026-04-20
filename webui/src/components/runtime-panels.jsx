@@ -3,7 +3,7 @@ import { ChevronRight, Workflow, X } from "lucide-react";
 import { buildWorkflowItems, compactText, formatTime, graphNodeQuestion, graphNodeStyles, projectWorkflowNode } from "../chat-utils";
 import { eventSummary } from "../timeline-utils";
 import { loadWorkflowPreferences, normalizeWorkflowPreferences, updateWorkflowPreferences } from "../settings-store";
-import { ExecutionPanel, KnowledgeBasePanel } from "./inspector-execution-panel";
+import { ExecutionPanel } from "./inspector-execution-panel";
 import { StatusPill } from "./status-pill";
 import { Button, Input, Select, Toggle } from "./ui";
 
@@ -201,7 +201,7 @@ function SessionSettingsPanel({ catalog, displayPreferences, onDisplayPreference
 
 function InspectorBody(props) {
   const tabs = [{ id: "workflow", label: "Workflow" }, { id: "execution", label: "执行" }, { id: "activity", label: "活动" }, { id: "session", label: "会话" }];
-  const { activityEvents, catalog, currentTab, currentTurn, cveQuery, cveResults, cveStatus, messages, onChangeTab, onClose, onRuntimeDraftChange, onSearchCve, onSelectNode, onSelectTurn, onSyncCve, planGraph, runtimeDraft, selectedGraphNode, selectedNodeId, session, setCveQuery, turns, workflowPreferences } = props;
+  const { activityEvents, catalog, currentTab, currentTurn, messages, onChangeTab, onClose, onRuntimeDraftChange, onSelectNode, onSelectTurn, planGraph, runtimeDraft, selectedGraphNode, selectedNodeId, session, turns, workflowPreferences } = props;
   const [displayPreferences, setDisplayPreferences] = useState(() => workflowSettings(workflowPreferences));
   const workflowItems = useMemo(() => buildWorkflowItems(planGraph, activityEvents), [planGraph, activityEvents]);
   const selectedWorkflowNode = useMemo(() => workflowItems.find((item) => item.node_id === selectedNodeId) || workflowItems.find((item) => item.node_id === selectedGraphNode?.node_id) || workflowItems.find((item) => item.is_active) || workflowItems[0] || null, [selectedGraphNode?.node_id, selectedNodeId, workflowItems]);
@@ -233,7 +233,7 @@ function InspectorBody(props) {
         {currentTab === "workflow" ? <div className="grid gap-4"><WorkflowView active items={workflowItems} preferences={displayPreferences} selectedNodeId={selectedNodeId} onSelect={onSelectNode} /><section className="rounded-[1.8rem] border border-slate-200 bg-white p-4 shadow-sm"><div className="flex items-center justify-between gap-3"><div><div className="text-sm font-medium text-slate-900">{selectedWorkflowNode?.title || "步骤详情"}</div><div className="mt-1 text-xs text-slate-500">{selectedWorkflowNode ? selectedWorkflowNode.kindLabel : "选择一个 workflow 步骤查看详情"}</div></div>{selectedWorkflowNode ? <StatusPill status={selectedWorkflowNode.status} /> : null}</div>{selectedWorkflowNode ? <div className="mt-4 grid gap-4"><StructuredSections sections={selectedWorkflowNode.detailSections} />{selectedWorkflowNode.block_reason ? <div className="rounded-[1.4rem] border border-orange-200 bg-orange-50 p-4 text-sm text-orange-900">{selectedWorkflowNode.block_reason}</div> : null}<FactChips items={displayPreferences.showEventMetadata ? [selectedWorkflowNode.rawTitle && selectedWorkflowNode.rawTitle !== selectedWorkflowNode.title ? `原始标题 ${selectedWorkflowNode.rawTitle}` : null, ...selectedWorkflowNode.metadataBadges].filter(Boolean) : []} /><RawDebugBlock label={selectedWorkflowNode.debugLabel} openByDefault={displayPreferences.expandDebugDataByDefault} payload={selectedWorkflowNode.debugPayload} /></div> : <div className="mt-4 text-sm text-slate-500">当前没有可查看的 workflow 详情。</div>}</section></div> : null}
         {currentTab === "execution" ? <ExecutionPanel activityEvents={activityEvents} currentTurn={currentTurn} messages={messages} onSelectTurn={onSelectTurn} planGraph={planGraph} turns={turns} /> : null}
         {currentTab === "activity" ? <ActivityFeed events={activityEvents} preferences={displayPreferences} /> : null}
-        {currentTab === "session" ? <div className="grid gap-4"><SessionSettingsPanel catalog={catalog} displayPreferences={displayPreferences} onDisplayPreferencesChange={saveDisplayPreferences} runtimeDraft={runtimeDraft} onRuntimeDraftChange={onRuntimeDraftChange} /><KnowledgeBasePanel cveQuery={cveQuery} cveResults={cveResults} cveStatus={cveStatus} onSearchCve={onSearchCve} onSyncCve={onSyncCve} setCveQuery={setCveQuery} /></div> : null}
+        {currentTab === "session" ? <SessionSettingsPanel catalog={catalog} displayPreferences={displayPreferences} onDisplayPreferencesChange={saveDisplayPreferences} runtimeDraft={runtimeDraft} onRuntimeDraftChange={onRuntimeDraftChange} /> : null}
       </div>
     </div>
   );

@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import yaml
-
 from digagent.config import AppSettings, get_settings
 from digagent.mcp_models import McpServerManifest
 from digagent.models import SessionPermissionOverrides
 
+from .capability_catalog import load_mcp_manifests
 from .permissions import server_allowed
 from .tool_policy import RuntimeToolBinding
 
@@ -18,15 +17,7 @@ def project_mcp_root(settings: AppSettings | None = None) -> Path:
 
 
 def load_mcp_server_manifests(settings: AppSettings | None = None) -> list[McpServerManifest]:
-    resolved = settings or get_settings()
-    root = project_mcp_root(resolved)
-    if not root.exists():
-        return []
-    manifests: list[McpServerManifest] = []
-    for path in sorted(root.glob("*.yaml")):
-        payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        manifests.append(McpServerManifest.model_validate(payload))
-    return manifests
+    return load_mcp_manifests(settings)
 
 
 def list_mcp_server_names(settings: AppSettings | None = None) -> list[str]:

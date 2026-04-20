@@ -11,6 +11,9 @@ tool_allowlist:
   - grep
   - web_search
   - web_fetch
+  - cve_search_local
+  - cve_fetch_online
+  - cve_sync_sources
   - vuln_kb_lookup
   - playwright-local_browser_navigate
   - playwright-local_browser_snapshot

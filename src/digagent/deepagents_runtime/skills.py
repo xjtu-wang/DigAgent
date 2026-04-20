@@ -4,6 +4,7 @@ from pathlib import Path
 
 from digagent.config import AppSettings, get_settings
 
+from .capability_catalog import skill_source_paths as catalog_skill_source_paths
 from ._paths import ensure_text_file, to_backend_path
 
 PROJECT_SKILLS = {
@@ -65,6 +66,4 @@ def ensure_project_skills(settings: AppSettings | None = None) -> list[Path]:
 
 def skill_source_paths(settings: AppSettings | None = None) -> list[str]:
     ensure_project_skills(settings)
-    root = project_skill_root(settings)
-    backend_path = to_backend_path(root, settings)
-    return [backend_path] if backend_path else []
+    return catalog_skill_source_paths(settings)

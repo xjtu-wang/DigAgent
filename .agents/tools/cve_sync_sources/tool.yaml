@@ -1,0 +1,32 @@
+name: cve_sync_sources
+description: Sync the local CVE cache from NVD and KEV upstream sources.
+version: 1
+function: run
+args_schema:
+  type: object
+  properties:
+    max_records:
+      type: integer
+    start_index:
+      type: integer
+    page_size:
+      type: integer
+output_schema:
+  type: object
+  properties:
+    status:
+      type: string
+    normalized_records:
+      type: integer
+    kev_records:
+      type: integer
+    last_synced_at:
+      type: string
+risk_tags:
+  - network
+timeout_sec: 60
+env_policy: inherit
+working_dir: .
+interrupt_on_call: true
+memory_hooks: {}
+report_hooks: {}

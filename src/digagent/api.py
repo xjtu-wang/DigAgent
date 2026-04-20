@@ -62,10 +62,6 @@ class PermissionOverridesPatch(BaseModel):
     clear: bool = False
 
 
-class CveSyncRequest(BaseModel):
-    max_records: int | None = None
-
-
 def create_app(manager: TurnManager | None = None) -> FastAPI:
     manager = manager or TurnManager()
     settings = getattr(manager, "settings", None) or get_settings()
@@ -361,24 +357,6 @@ def create_app(manager: TurnManager | None = None) -> FastAPI:
         if format == "pdf":
             return FileResponse(manager.storage.report_pdf_path(report_id), media_type="application/pdf")
         raise HTTPException(status_code=400, detail="Unsupported format")
-
-    @app.get("/api/cve/status")
-    async def cve_status():
-        return manager.cve_status()
-
-    @app.post("/api/cve/sync")
-    async def cve_sync(body: CveSyncRequest):
-        try:
-            return await manager.sync_cve(max_records=body.max_records)
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    @app.get("/api/cve/search")
-    async def cve_search(query: str = "", cve_id: str | None = None, cwe: str | None = None, product: str | None = None, limit: int = 20):
-        return {
-            "items": manager.search_cve(query=query, cve_id=cve_id, cwe=cwe, product=product, limit=limit),
-            "state": manager.cve_status(),
-        }
 
     frontend_dist = settings.frontend_dist
     if frontend_dist.exists():

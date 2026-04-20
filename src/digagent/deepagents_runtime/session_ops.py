@@ -4,11 +4,9 @@ import asyncio
 from typing import Any
 
 from digagent.config import current_env_summary, load_profiles
+from digagent.deepagents_runtime.capability_catalog import build_capability_catalog
 from digagent.deepagents_runtime.factory import build_runtime
-from digagent.deepagents_runtime.mcp import list_mcp_server_names
 from digagent.deepagents_runtime.memory import memory_source_paths
-from digagent.deepagents_runtime.project_tools import project_tool_catalog
-from digagent.deepagents_runtime.skills import skill_source_paths
 from digagent.deepagents_runtime.state import SessionRuntimeHandle
 from digagent.deepagents_runtime.turns import POLL_INTERVAL_SEC, TERMINAL_TURN_STATUSES, load_session_events, load_turn_events
 from digagent.models import ApprovalStatus, MessageRecord, Scope, SessionPermissionOverrides, SessionRecord, TurnEvent, TurnRecord, TurnStatus
@@ -17,6 +15,7 @@ from digagent.models import ApprovalStatus, MessageRecord, Scope, SessionPermiss
 class TurnManagerSessionMixin:
     def catalog(self) -> dict[str, Any]:
         profiles = load_profiles(self.settings)
+        capabilities = build_capability_catalog(self.settings)
         return {
             "framework": "deepagents",
             "env": current_env_summary(self.settings),
@@ -24,11 +23,10 @@ class TurnManagerSessionMixin:
                 {"name": item.name, "description": item.description, "model": item.model or self.settings.model}
                 for item in profiles.values()
             ],
-            "tools": project_tool_catalog(self.settings),
-            "skills": skill_source_paths(self.settings),
+            "tools": capabilities["tools"],
+            "skills": capabilities["skills"],
             "memory": memory_source_paths(self.settings),
-            "mcp_servers": list_mcp_server_names(self.settings),
-            "cve": self.cve_status(),
+            "mcp_servers": capabilities["mcp_servers"],
         }
 
     def create_session(self, title: str, profile_name: str, scope: Scope) -> SessionRecord:
@@ -159,15 +157,6 @@ class TurnManagerSessionMixin:
 
     def get_artifact(self, artifact_id: str):
         return self.storage.load_artifact(artifact_id)
-
-    async def sync_cve(self, max_records: int | None = None) -> dict[str, Any]:
-        return (await self.knowledge_base.sync(max_records=max_records)).model_dump(mode="json")
-
-    def cve_status(self) -> dict[str, Any]:
-        return self.knowledge_base.state().model_dump(mode="json")
-
-    def search_cve(self, *, query: str = "", cve_id: str | None = None, cwe: str | None = None, product: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
-        return [item.model_dump(mode="json") for item in self.knowledge_base.search(query=query, cve_id=cve_id, cwe=cwe, product=product, limit=limit)]
 
     async def _runtime_handle(self, session: SessionRecord, *, auto_approve: bool) -> SessionRuntimeHandle:
         resolved_auto_approve = auto_approve or session.permission_overrides.auto_approve

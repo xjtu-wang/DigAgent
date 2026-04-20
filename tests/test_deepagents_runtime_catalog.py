@@ -8,6 +8,9 @@ from digagent.deepagents_runtime.tools import build_custom_tools
 from digagent.runtime import TurnManager
 
 EXPECTED_PROJECT_TOOLS = {
+    "cve_fetch_online",
+    "cve_search_local",
+    "cve_sync_sources",
     "ctf_orchestrator_inventory",
     "report_export",
     "shell_exec",
@@ -42,6 +45,7 @@ def test_build_custom_tools_includes_manifest_backed_project_tools(test_settings
 def test_interrupt_config_uses_manifest_defaults(test_settings) -> None:
     config = interrupt_on_config(None, auto_approve=False, settings=test_settings)
     assert config is not None
+    assert config["cve_sync_sources"] is True
     assert config["edit_file"] is True
     assert config["report_export"] is True
     assert config["shell_exec"] is True
@@ -51,7 +55,8 @@ def test_interrupt_config_uses_manifest_defaults(test_settings) -> None:
 def test_turn_manager_catalog_exposes_agents_tools(test_settings) -> None:
     manager = TurnManager(test_settings)
     catalog = manager.catalog()
-    assert catalog["skills"] == ["/.agents/skills"]
     assert catalog["memory"] == ["/.agents/memory/project.md"]
     assert {item["name"] for item in catalog["tools"]} == EXPECTED_PROJECT_TOOLS
-    assert set(catalog["mcp_servers"]) == {"fixture-mcp", "kali-local", "playwright-local"}
+    assert any(item["name"] == "cve-intel" and item["path"] == "/.agents/skills/cve-intel" for item in catalog["skills"])
+    assert any(item["name"] == "digagent-runtime" and item["path"] == "/.agents/skills/digagent-runtime" for item in catalog["skills"])
+    assert {item["server_id"] for item in catalog["mcp_servers"]} == {"fixture-mcp", "kali-local", "playwright-local"}
