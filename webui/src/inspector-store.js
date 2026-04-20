@@ -89,8 +89,6 @@ function buildNode(node) {
     superseded_by: null,
     owner_profile_name: null,
     grant_id: null,
-    plugin_id: null,
-    command_name: null,
     is_active: node.status === "running",
     ...node,
   };

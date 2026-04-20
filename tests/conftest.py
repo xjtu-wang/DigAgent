@@ -23,7 +23,6 @@ def test_settings(tmp_path: Path, repo_root: Path):
         MODEL="fake-model",
         DIGAGENT_USE_FAKE_MODEL=False,
         workspace_root=repo_root,
-        config_dir=repo_root / "config",
         data_dir=data_dir,
         frontend_dist=repo_root / "webui" / "dist",
         pdf_renderer_script=repo_root / "webui" / "render-pdf.mjs",

@@ -15,12 +15,6 @@ def load_prompt_text(prompt_ref: str | Path, settings: AppSettings | None = None
     return _load_prompt_path(_resolve_prompt_path(prompt_ref, settings))
 
 
-def load_runtime_prompt(template_name: str, settings: AppSettings | None = None) -> str:
-    settings = settings or _load_default_settings()
-    prompt_dir = settings.config_dir / "prompts" / "runtime" / template_name
-    return _load_prompt_path(prompt_dir)
-
-
 def _load_default_settings() -> AppSettings:
     from digagent.config import get_settings
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from digagent.config import load_profiles
-from digagent.prompts import load_prompt_text, load_runtime_prompt
+from digagent.prompts import load_prompt_text
 
 
 def test_load_profiles_expands_settings_env_values(test_settings):
@@ -42,8 +42,3 @@ def test_load_prompt_text_directory_rejects_empty_directory(tmp_path):
 
     with pytest.raises(FileNotFoundError, match="does not contain any markdown fragments"):
         load_prompt_text(prompt_dir)
-
-
-def test_load_runtime_prompt_requires_existing_template(test_settings):
-    with pytest.raises(FileNotFoundError, match="Prompt path does not exist"):
-        load_runtime_prompt("missing-template", settings=test_settings)

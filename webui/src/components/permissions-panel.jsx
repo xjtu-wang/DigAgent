@@ -74,16 +74,6 @@ function useToolCatalog(catalog, profile) {
         origin: "tool",
       });
     });
-    (catalog?.plugins || []).forEach((plugin) => {
-      (plugin.commands || []).forEach((command) => {
-        addEntry({
-          name: command.name,
-          description: `${plugin.name} — ${command.description}`,
-          risk_tags: command.risk_tags || [],
-          origin: "plugin",
-        });
-      });
-    });
     ["delegate_subagent", "skill_consult", "report_export"].forEach((name) => {
       addEntry({ name, description: "System action", risk_tags: [], origin: "system" });
     });

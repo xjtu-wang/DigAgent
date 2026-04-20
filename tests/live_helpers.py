@@ -17,7 +17,6 @@ def build_live_settings(tmp_path: Path, repo_root: Path) -> tuple[AppSettings, s
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True, exist_ok=True)
     shutil.copytree(repo_root / ".agents", workspace_root / ".agents", dirs_exist_ok=True)
-    shutil.copytree(repo_root / "config", workspace_root / "config", dirs_exist_ok=True)
     token = f"probe-{uuid.uuid4().hex}"
     (workspace_root / "probe.txt").write_text(token, encoding="utf-8")
     settings = AppSettings(
@@ -26,7 +25,6 @@ def build_live_settings(tmp_path: Path, repo_root: Path) -> tuple[AppSettings, s
         MODEL=current.model,
         DIGAGENT_USE_FAKE_MODEL=False,
         workspace_root=workspace_root,
-        config_dir=workspace_root / "config",
         data_dir=workspace_root / "data",
         frontend_dist=repo_root / "webui" / "dist",
         pdf_renderer_script=repo_root / "webui" / "render-pdf.mjs",
@@ -43,7 +41,6 @@ def cli_env(settings: AppSettings) -> dict[str, str]:
             "MODEL": str(settings.model or ""),
             "DIGAGENT_USE_FAKE_MODEL": "0",
             "WORKSPACE_ROOT": str(settings.workspace_root),
-            "CONFIG_DIR": str(settings.config_dir),
             "DATA_DIR": str(settings.data_dir),
             "FRONTEND_DIST": str(settings.frontend_dist),
         }

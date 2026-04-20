@@ -2,7 +2,6 @@ const EMPTY_CATALOG = Object.freeze({
   profiles: [],
   tools: [],
   skills: [],
-  plugins: [],
   mcp_servers: [],
   cve: { status: "idle" },
 });
@@ -29,7 +28,6 @@ export function normalizeCatalog(value) {
     profiles: normalizeArray(value.profiles),
     tools: normalizeArray(value.tools),
     skills: normalizeArray(value.skills),
-    plugins: normalizeArray(value.plugins),
     mcp_servers: normalizeArray(value.mcp_servers),
     cve: value.cve && typeof value.cve === "object" && !Array.isArray(value.cve)
       ? { ...defaults.cve, ...value.cve }

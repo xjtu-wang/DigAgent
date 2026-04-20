@@ -25,6 +25,16 @@ def test_create_turn_persists_turn_ids_into_session(storage) -> None:
     assert storage.find_turn(turn.turn_id).trigger_message_id == "msg_seed_turn"
 
 
+def test_storage_layout_only_creates_runtime_data_directories(storage) -> None:
+    assert (storage.root / "sessions").is_dir()
+    assert (storage.root / "reports").is_dir()
+    assert (storage.root / "memory").is_dir()
+    assert not (storage.root / "skills").exists()
+    assert not (storage.root / "tools").exists()
+    assert not (storage.root / "mcp").exists()
+    assert not (storage.root / "agents").exists()
+
+
 def test_turn_event_storage_round_trips_turn_and_session_streams(storage) -> None:
     session = storage.create_session("turn-events", "sisyphus-default", Scope())
     turn = storage.create_turn(

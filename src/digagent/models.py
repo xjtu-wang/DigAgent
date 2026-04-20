@@ -275,8 +275,6 @@ class TaskNode(DigAgentModel):
     superseded_by: str | None = None
     owner_profile_name: str | None = None
     grant_id: str | None = None
-    plugin_id: str | None = None
-    command_name: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     is_active: bool = False
 
@@ -286,6 +284,8 @@ class TaskNode(DigAgentModel):
         if not isinstance(value, dict):
             return value
         payload = dict(value)
+        payload.pop("plugin_id", None)
+        payload.pop("command_name", None)
         metadata = dict(payload.get("metadata") or {})
         if payload.get("kind") in {TaskNodeKind.SUBAGENT, TaskNodeKind.SUBAGENT.value}:
             payload["owner_profile_name"] = payload.get("owner_profile_name") or metadata.get("owner_profile_name")

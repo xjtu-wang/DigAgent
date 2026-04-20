@@ -22,13 +22,11 @@ class AppSettings(BaseSettings):
     nvd_api_key: str | None = Field(default=None, alias="NVD_API_KEY")
     digagent_use_fake_model: bool = Field(default=False, alias="DIGAGENT_USE_FAKE_MODEL")
     workspace_root: Path = Field(default_factory=lambda: Path.cwd())
-    config_dir: Path = Field(default_factory=lambda: Path.cwd() / "config")
     data_dir: Path = Field(default_factory=lambda: Path.cwd() / "data")
     frontend_dist: Path = Field(default_factory=lambda: Path.cwd() / "webui" / "dist")
     pdf_renderer_script: Path = Field(default_factory=lambda: Path.cwd() / "webui" / "render-pdf.mjs")
     chrome_bin: str = Field(default="/usr/sbin/google-chrome-stable", alias="GOOGLE_CHROME_BIN")
     web_search_base_url: str = Field(default="https://www.bing.com/search", alias="WEB_SEARCH_BASE_URL")
-    mcp_resources_path: Path | None = Field(default=None, alias="MCP_RESOURCES_PATH")
     mcp_servers_dir: Path | None = Field(default=None, alias="MCP_SERVERS_DIR")
     shell_timeout_sec: int = 60
     shell_output_limit: int = 32768
