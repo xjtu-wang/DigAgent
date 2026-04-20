@@ -3,14 +3,14 @@ import { cva } from "class-variance-authority";
 import { cn } from "../lib";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center rounded-2xl px-4 py-2 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 disabled:cursor-not-allowed disabled:opacity-50",
+  "inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-medium transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--app-border-strong)] disabled:cursor-not-allowed disabled:opacity-50",
   {
     variants: {
       variant: {
-        primary: "bg-slate-900 text-white hover:bg-slate-800",
-        secondary: "bg-white text-slate-800 ring-1 ring-slate-200 hover:bg-slate-50",
-        ghost: "bg-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-900",
-        danger: "bg-rose-600 text-white hover:bg-rose-700",
+        primary: "bg-[color:var(--app-text)] text-white shadow-[var(--app-shadow-soft)] hover:bg-[color:var(--app-accent-strong)]",
+        secondary: "bg-[color:var(--app-panel)] text-[color:var(--app-text)] ring-1 ring-[color:var(--app-border)] hover:bg-[color:var(--app-panel-muted)]",
+        ghost: "bg-transparent text-[color:var(--app-text-soft)] hover:bg-[color:var(--app-panel-muted)] hover:text-[color:var(--app-text)]",
+        danger: "bg-[color:var(--app-danger)] text-white hover:opacity-95",
       },
       size: {
         md: "h-10",
@@ -32,7 +32,7 @@ export function Input({ className, ...props }) {
   return (
     <input
       className={cn(
-        "w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-200",
+        "w-full rounded-[1.35rem] border border-[color:var(--app-border)] bg-[color:var(--app-panel)] px-4 py-3 text-sm text-[color:var(--app-text)] outline-none transition placeholder:text-[color:var(--app-text-faint)] focus:border-[color:var(--app-border-strong)] focus:ring-2 focus:ring-[color:var(--app-panel-strong)]",
         className,
       )}
       {...props}
@@ -44,7 +44,7 @@ export function Textarea({ className, ...props }) {
   return (
     <textarea
       className={cn(
-        "w-full rounded-[1.75rem] border border-slate-200 bg-white px-4 py-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-200",
+        "w-full rounded-[1.75rem] border border-[color:var(--app-border)] bg-[color:var(--app-panel)] px-4 py-4 text-sm text-[color:var(--app-text)] outline-none transition placeholder:text-[color:var(--app-text-faint)] focus:border-[color:var(--app-border-strong)] focus:ring-2 focus:ring-[color:var(--app-panel-strong)]",
         className,
       )}
       {...props}
@@ -53,23 +53,23 @@ export function Textarea({ className, ...props }) {
 }
 
 export function Badge({ className, children }) {
-  return <span className={cn("inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700", className)}>{children}</span>;
+  return <span className={cn("inline-flex rounded-full bg-[color:var(--app-panel-muted)] px-3 py-1 text-xs font-medium text-[color:var(--app-text-soft)]", className)}>{children}</span>;
 }
 
 export function Card({ className, ...props }) {
-  return <div className={cn("rounded-[2rem] border border-slate-200 bg-white shadow-[0_16px_50px_rgba(15,23,42,0.06)]", className)} {...props} />;
+  return <div className={cn("rounded-[2rem] border border-[color:var(--app-border)] bg-[color:var(--app-panel)] shadow-[var(--app-shadow)]", className)} {...props} />;
 }
 
 export function SectionLabel({ className, ...props }) {
-  return <div className={cn("text-xs font-semibold uppercase tracking-[0.18em] text-slate-400", className)} {...props} />;
+  return <div className={cn("text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--app-text-faint)]", className)} {...props} />;
 }
 
 export function Toggle({ checked, onChange, label, description }) {
   return (
-    <label className="flex items-start justify-between gap-4 rounded-3xl border border-slate-200 bg-white px-4 py-4">
+    <label className="flex items-start justify-between gap-4 rounded-[1.6rem] border border-[color:var(--app-border)] bg-[color:var(--app-panel)] px-4 py-4">
       <div className="min-w-0">
-        <div className="text-sm font-medium text-slate-900">{label}</div>
-        {description ? <div className="mt-1 text-sm leading-6 text-slate-500">{description}</div> : null}
+        <div className="text-sm font-medium text-[color:var(--app-text)]">{label}</div>
+        {description ? <div className="mt-1 text-sm leading-6 text-[color:var(--app-text-soft)]">{description}</div> : null}
       </div>
       <button
         type="button"
@@ -78,7 +78,7 @@ export function Toggle({ checked, onChange, label, description }) {
         onClick={() => onChange(!checked)}
         className={cn(
           "relative mt-1 inline-flex h-7 w-12 shrink-0 rounded-full transition",
-          checked ? "bg-slate-900" : "bg-slate-200",
+          checked ? "bg-[color:var(--app-text)]" : "bg-[color:var(--app-panel-strong)]",
         )}
       >
         <span
@@ -96,7 +96,7 @@ export function Select({ className, children, ...props }) {
   return (
     <select
       className={cn(
-        "w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200",
+        "w-full rounded-[1.35rem] border border-[color:var(--app-border)] bg-[color:var(--app-panel)] px-4 py-3 text-sm text-[color:var(--app-text)] outline-none transition focus:border-[color:var(--app-border-strong)] focus:ring-2 focus:ring-[color:var(--app-panel-strong)]",
         className,
       )}
       {...props}

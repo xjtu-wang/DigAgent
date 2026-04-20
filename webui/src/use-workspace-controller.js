@@ -583,7 +583,7 @@ export function useWorkspaceController(appSettings) {
       fetch(`/api/turns/${turnId}/graph`, { signal }),
     ]);
     ensureOk(eventsResponse, "执行历史加载失败");
-    ensureOk(graphResponse, "Workflow 加载失败");
+    ensureOk(graphResponse, "执行流程加载失败");
     const [rawEvents, graphPayload] = await Promise.all([eventsResponse.text(), graphResponse.json()]);
     if (signal?.aborted || currentSessionIdRef.current !== sessionId || sessionIntentRef.current !== sessionId) {
       return null;

@@ -88,7 +88,7 @@ export function ComposerMentionInput({ agents, enterToSend, onSubmit, placeholde
     <div className="px-1 pt-1">
       <textarea
         ref={textareaRef}
-        className="max-h-[240px] min-h-[56px] w-full resize-none border-0 bg-transparent px-4 py-3 text-[15px] leading-7 text-slate-900 outline-none transition placeholder:text-slate-400 focus:ring-0"
+        className="max-h-[240px] min-h-[56px] w-full resize-none border-0 bg-transparent px-4 py-3 text-[15px] leading-7 text-[color:var(--app-text)] outline-none transition placeholder:text-[color:var(--app-text-faint)] focus:ring-0"
         placeholder={placeholder}
         value={value}
         onChange={(event) => {
@@ -106,7 +106,7 @@ export function ComposerMentionInput({ agents, enterToSend, onSubmit, placeholde
           {mentions.map((item) => (
             <Badge
               key={item.name}
-              className={item.configured ? "bg-sky-100 text-sky-800" : "bg-amber-100 text-amber-800"}
+              className={item.configured ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}
             >
               @{item.name}
             </Badge>
@@ -114,12 +114,12 @@ export function ComposerMentionInput({ agents, enterToSend, onSubmit, placeholde
         </div>
       ) : null}
       {suggestions.length ? (
-        <div className="mx-4 mb-2 rounded-2xl border border-slate-200 bg-white p-1 shadow-[0_12px_30px_rgba(15,23,42,0.08)]">
+        <div className="mx-4 mb-2 rounded-[1.5rem] border border-[color:var(--app-border)] bg-[color:var(--app-panel)] p-1 shadow-[var(--app-shadow)]">
           {suggestions.map((item, index) => (
             <button
               key={item.name}
               type="button"
-              className={`flex w-full items-start justify-between gap-3 rounded-xl px-3 py-2 text-left ${index === activeIndex ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-50"}`}
+              className={`flex w-full items-start justify-between gap-3 rounded-[1.15rem] px-3 py-2 text-left ${index === activeIndex ? "bg-[color:var(--app-text)] text-white" : "text-[color:var(--app-text)] hover:bg-[color:var(--app-panel-muted)]"}`}
               onMouseDown={(event) => {
                 event.preventDefault();
                 insertMention(item.name);
@@ -127,9 +127,9 @@ export function ComposerMentionInput({ agents, enterToSend, onSubmit, placeholde
             >
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium">@{item.name}</div>
-                {item.description ? <div className={`mt-0.5 text-xs ${index === activeIndex ? "text-slate-300" : "text-slate-500"}`}>{item.description}</div> : null}
+                {item.description ? <div className={`mt-0.5 text-xs ${index === activeIndex ? "text-slate-300" : "text-[color:var(--app-text-soft)]"}`}>{item.description}</div> : null}
               </div>
-              <div className={`shrink-0 text-[11px] ${index === activeIndex ? "text-slate-300" : "text-slate-400"}`}>Tab</div>
+              <div className={`shrink-0 text-[11px] ${index === activeIndex ? "text-slate-300" : "text-[color:var(--app-text-faint)]"}`}>Tab</div>
             </button>
           ))}
         </div>

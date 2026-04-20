@@ -1,3 +1,5 @@
+import { statusLabel } from "./ui-copy.js";
+
 const TERMINAL_STATUSES = [
   "completed",
   "failed",
@@ -21,21 +23,6 @@ const ACTION_EVENT_TYPES = [
   "approval_required",
   "approval_resolved",
 ];
-
-const STATUS_LABELS = {
-  created: "已创建",
-  planning: "规划中",
-  running: "执行中",
-  aggregating: "整理中",
-  reporting: "撰写中",
-  awaiting_approval: "等待审批",
-  awaiting_user_input: "等待补充",
-  completed: "已完成",
-  failed: "失败",
-  cancelled: "已取消",
-  superseded: "已被替代",
-  timed_out: "超时",
-};
 
 export const TERMINAL_TURN_STATUSES = new Set(TERMINAL_STATUSES);
 
@@ -106,13 +93,13 @@ function summarizeActionEvent(event) {
     return compact(data.result?.summary || data.task?.goal || "子 Agent 返回结果");
   }
   if (event?.type === "task_node_started" || event?.type === "task_node_completed") {
-    return compact(data.title || data.node_id || "更新了一个 workflow 步骤");
+    return compact(data.title || data.node_id || "更新了一个执行步骤");
   }
   if (event?.type === "task_node_waiting_approval") {
-    return compact(data.reason || "workflow 步骤等待审批");
+    return compact(data.reason || "执行步骤等待确认");
   }
   if (event?.type === "task_node_waiting_user_input") {
-    return compact(data.question || data.prompt || "workflow 步骤等待补充信息");
+    return compact(data.question || data.prompt || "执行步骤等待补充信息");
   }
   if (event?.type === "aggregate") {
     return compact(data.summary || "完成了阶段汇总");
@@ -124,10 +111,10 @@ function summarizeActionEvent(event) {
     return compact(data.summary || data.report_id || "生成了报告");
   }
   if (event?.type === "approval_required") {
-    return "触发了一次审批请求";
+    return "触发了一次确认请求";
   }
   if (event?.type === "approval_resolved") {
-    return data.status === "approved" ? "审批已通过，继续执行" : "审批被拒绝";
+    return data.status === "approved" ? "已批准，执行继续" : "已拒绝，本次执行不会继续";
   }
   return compact(data.summary || data.title || data.reason || event?.type || "");
 }
@@ -177,7 +164,7 @@ export function normalizeTurnEvent(event) {
 }
 
 export function turnStatusLabel(status) {
-  return STATUS_LABELS[status] || String(status || "unknown");
+  return statusLabel(status || "unknown");
 }
 
 export function turnGoal(turn, userMessage = null) {
@@ -206,14 +193,14 @@ export function turnResultSummary(turn, assistantMessage = null, events = []) {
     return compact(turn.error_message || "当前执行已被新的消息替代。", 180);
   }
   if (turn.status === "awaiting_approval" || turn.status === "awaiting_user_input") {
-    return compact(waitingReason(turn, events) || "执行被挂起，等待进一步处理。", 180);
+    return compact(waitingReason(turn, events) || "执行已暂停，等待你继续处理。", 180);
   }
   return compact(
     turn.result_summary
       || turn.summary
       || assistantMessage?.content
       || turn.final_response
-      || (turn.report_id ? "执行已完成，并生成报告。" : ""),
+      || (turn.report_id ? "执行已完成，并生成了结果报告。" : ""),
     180,
   );
 }

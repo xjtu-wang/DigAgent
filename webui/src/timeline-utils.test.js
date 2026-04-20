@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { filterActivityEvents, filterPrimaryTimeline, mergeHistory } from "./timeline-utils.js";
+import { eventSummary, filterActivityEvents, filterPrimaryTimeline, mergeHistory } from "./timeline-utils.js";
 
 test("filterPrimaryTimeline keeps messages, turn cards, and key approval cards", () => {
   const timeline = [
@@ -79,4 +79,11 @@ test("mergeHistory suppresses chunk-only process rows once the final reply is pr
   ];
 
   assert.deepEqual(mergeHistory(messages, events, turns).map((item) => item.type), ["user_message", "assistant_message"]);
+});
+
+test("eventSummary uses user-facing wording for approval and workflow states", () => {
+  assert.equal(eventSummary({ type: "approval_resolved", data: { status: "approved" } }), "已批准，执行继续");
+  assert.equal(eventSummary({ type: "awaiting_approval", data: { approval_ids: ["apr-1", "apr-2"] } }), "等待确认（2 项）");
+  assert.equal(eventSummary({ type: "graph_op_applied", data: {} }), "执行流程已更新");
+  assert.equal(eventSummary({ type: "turn_terminal_recorded", data: { status: "awaiting_user_input" } }), "执行结束 · 等待补充信息");
 });

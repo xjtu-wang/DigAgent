@@ -10,9 +10,10 @@ import { InspectorDrawer, InspectorToggleButton } from "./runtime-panels";
 import { MobileSidebar, MobileSidebarButton, SessionSidebar } from "./session-sidebar";
 import { StatusPill } from "./status-pill";
 import { Badge, Button } from "./ui";
+import { composerPlaceholder, composerRuntimeChips, enterHintLabel } from "../ui-copy";
 
 function ClampedText({ className = "", text }) {
-  const value = text || "新聊天";
+  const value = text || "新对话";
   return (
     <div
       className={`overflow-hidden text-ellipsis [overflow-wrap:anywhere] ${className}`}
@@ -26,56 +27,46 @@ function ClampedText({ className = "", text }) {
 
 function EmptyState() {
   return (
-    <div className="mx-auto flex h-full max-w-3xl flex-col items-center justify-center px-6 text-center">
-      <h1 className="text-3xl font-semibold tracking-tight text-slate-900 sm:text-[2rem]">今天想让 DigAgent 帮你完成什么？</h1>
-      <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-500">直接开始对话。执行卡片、审批和 workflow 会在主聊天流与右侧检查面板里同步更新。</p>
+    <div className="mx-auto flex h-full max-w-[48rem] flex-col items-center justify-center px-6 text-center">
+      <div className="rounded-full bg-[color:var(--app-panel)] px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--app-text-faint)] ring-1 ring-[color:var(--app-border)]">DigAgent</div>
+      <h1 className="mt-6 max-w-3xl font-[var(--font-display)] text-[2.4rem] leading-tight text-[color:var(--app-text)] sm:text-[3rem]">先说清目标，再按需要查看执行过程。</h1>
+      <p className="mt-4 max-w-2xl text-sm leading-8 text-[color:var(--app-text-soft)]">直接发送消息即可。工具调用、Agent 协作、确认请求、执行流程和结果报告都会继续保留，但只会在需要时展开显示。</p>
     </div>
   );
 }
 
-function HeaderActions({ canArchiveCurrentSession, canDeleteCurrentSession, onDeleteSession, onOpenPermissions, onOpenSettings, onStartFreshSession, onToggleArchive, permissionBadge, session }) {
+function ActionButton({ badge = null, children, disabled = false, onClick }) {
   return (
-    <div className="flex flex-wrap items-center gap-1">
-      <Button variant="ghost" size="sm" onClick={onStartFreshSession}><SquarePen size={15} className="mr-2" />新聊天</Button>
-      <Button variant="ghost" size="sm" onClick={onOpenPermissions} disabled={!session?.session_id}>
-        <ShieldCheck size={15} className="mr-2" />
-        会话权限
-        {permissionBadge ? <Badge className="ml-2 bg-slate-900 text-[10px] text-white">{permissionBadge}</Badge> : null}
-      </Button>
-      <Button variant="ghost" size="sm" onClick={onOpenSettings}><Settings2 size={15} className="mr-2" />设置</Button>
-      <Button variant="ghost" size="sm" onClick={onToggleArchive} disabled={!canArchiveCurrentSession}><Archive size={15} className="mr-2" />{session?.status === "archived" ? "恢复" : "归档"}</Button>
-      <Button variant="ghost" size="sm" onClick={() => onDeleteSession(session?.session_id)} disabled={!canDeleteCurrentSession}>删除</Button>
-    </div>
+    <Button variant="ghost" size="sm" disabled={disabled} onClick={onClick} className="h-9 gap-2 px-3 text-[color:var(--app-text-soft)]">
+      {children}
+      {badge ? <Badge className="bg-[color:var(--app-text)] text-[10px] text-white">{badge}</Badge> : null}
+    </Button>
   );
 }
 
 function WorkspaceHeader({ activeTurn, canArchiveCurrentSession, canDeleteCurrentSession, currentTurn, inspectorOpen, onDeleteSession, onOpenPermissions, onOpenSettings, onOpenSidebar, onStartFreshSession, onToggleArchive, onToggleInspector, permissionBadge, session }) {
   const previewTurn = activeTurn || currentTurn;
   return (
-    <header className="flex h-14 shrink-0 items-center border-b border-slate-200/70 bg-white px-3 md:px-4">
-      <div className="flex w-full items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
+    <header className="border-b border-[color:var(--app-border)] bg-[color:var(--app-panel)]/90 px-3 py-3 md:px-5">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-3">
           <MobileSidebarButton onClick={onOpenSidebar} />
           <div className="min-w-0">
-            <ClampedText className="text-[15px] font-semibold text-slate-900" text={session?.title} />
-            <div className="flex items-center gap-2 text-xs text-slate-500">
+            <div className="flex flex-wrap items-center gap-2">
+              <ClampedText className="text-[17px] font-semibold text-[color:var(--app-text)]" text={session?.title} />
               <StatusPill status={session?.status || "idle"} />
-              {previewTurn ? <ClampedText className="min-w-0" text={compactText(previewTurn.goal || previewTurn.user_task || previewTurn.task, 80)} /> : null}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-[color:var(--app-text-faint)]">
+              {previewTurn ? <ClampedText className="max-w-[32rem]" text={compactText(previewTurn.goal || previewTurn.user_task || previewTurn.task, 110)} /> : <span>当前会话还没有执行记录。</span>}
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-1">
-          <HeaderActions
-            canArchiveCurrentSession={canArchiveCurrentSession}
-            canDeleteCurrentSession={canDeleteCurrentSession}
-            onDeleteSession={onDeleteSession}
-            onOpenPermissions={onOpenPermissions}
-            onOpenSettings={onOpenSettings}
-            onStartFreshSession={onStartFreshSession}
-            onToggleArchive={onToggleArchive}
-            permissionBadge={permissionBadge}
-            session={session}
-          />
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+          <ActionButton onClick={onStartFreshSession}><SquarePen size={15} />新对话</ActionButton>
+          <ActionButton badge={permissionBadge} disabled={!session?.session_id} onClick={onOpenPermissions}><ShieldCheck size={15} />会话权限</ActionButton>
+          <ActionButton onClick={onOpenSettings}><Settings2 size={15} />设置</ActionButton>
+          <ActionButton disabled={!canArchiveCurrentSession} onClick={onToggleArchive}><Archive size={15} />{session?.status === "archived" ? "恢复" : "归档"}</ActionButton>
+          <Button variant="ghost" size="sm" disabled={!canDeleteCurrentSession} onClick={() => onDeleteSession(session?.session_id)} className="h-9 px-3 text-[color:var(--app-text-faint)]">删除</Button>
           <InspectorToggleButton open={inspectorOpen} onClick={onToggleInspector} />
         </div>
       </div>
@@ -85,50 +76,46 @@ function WorkspaceHeader({ activeTurn, canArchiveCurrentSession, canDeleteCurren
 
 function ComposerPanel({ activeTurn, agents, onCancelTurn, onDownloadReport, onSendMessage, permissionOverrides, runtimeDraft, session, settings, setTask, task }) {
   const mentionAgents = useMemo(() => normalizeMentionAgents(agents), [agents]);
-  const chips = useMemo(() => {
-    const entries = [runtimeDraft.profile];
-    if (runtimeDraft.repoPath) entries.push(runtimeDraft.repoPath);
-    if (runtimeDraft.domain) entries.push(runtimeDraft.domain);
-    if (runtimeDraft.autoApprove) entries.push("页面自动审批");
-    if (permissionOverrides?.auto_approve) entries.push("会话自动审批");
-    return entries;
-  }, [permissionOverrides?.auto_approve, runtimeDraft]);
+  const chips = useMemo(
+    () => composerRuntimeChips(runtimeDraft, permissionOverrides),
+    [permissionOverrides, runtimeDraft],
+  );
   const submitPayload = useMemo(() => ({
     content: task.trim(),
     mentions: collectComposerMentions(task, mentionAgents).filter((item) => item.configured).map((item) => item.name),
   }), [mentionAgents, task]);
 
   return (
-    <div className="border-t border-slate-200/70 bg-white px-3 pb-4 pt-3 md:px-4">
-      <div className="mx-auto max-w-3xl">
-        <div className="rounded-[1.75rem] border border-slate-200 bg-white shadow-[0_2px_10px_rgba(0,0,0,0.04)] transition focus-within:border-slate-300 focus-within:shadow-[0_4px_16px_rgba(0,0,0,0.06)]">
+    <div className="border-t border-[color:var(--app-border)] bg-[color:var(--app-panel)] px-3 pb-4 pt-3 md:px-5">
+      <div className="mx-auto max-w-[52rem]">
+        <div className="rounded-[2rem] border border-[color:var(--app-border)] bg-[color:var(--app-panel)] shadow-[var(--app-shadow)]">
           <ComposerMentionInput
             agents={agents}
             enterToSend={settings.chatPreferences.enterToSend}
             onSubmit={(payload) => void onSendMessage(payload)}
-            placeholder="向 DigAgent 发送消息，输入 @agent 可自动补全"
+            placeholder={composerPlaceholder()}
             setValue={setTask}
             value={task}
           />
-          <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-3">
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-              {chips.map((chip) => <Badge key={chip} className="bg-slate-100 text-[11px] text-slate-600">{chip}</Badge>)}
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 pb-4">
+            <div className="flex min-w-0 flex-wrap gap-2">
+              {chips.map((chip) => <Badge key={chip}>{chip}</Badge>)}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               {activeTurn ? <Button variant="ghost" size="sm" onClick={onCancelTurn}><XCircle size={14} className="mr-1.5" />取消</Button> : null}
               {session?.latest_report_id ? (
                 <>
-                  <Button variant="ghost" size="sm" onClick={() => onDownloadReport(session.latest_report_id, "markdown")}>Markdown</Button>
-                  <Button variant="ghost" size="sm" onClick={() => onDownloadReport(session.latest_report_id, "pdf")}>PDF</Button>
+                  <Button variant="secondary" size="sm" onClick={() => onDownloadReport(session.latest_report_id, "markdown")}>Markdown</Button>
+                  <Button variant="secondary" size="sm" onClick={() => onDownloadReport(session.latest_report_id, "pdf")}>PDF</Button>
                 </>
               ) : null}
-              <Button size="sm" className="h-9 w-9 rounded-full p-0" onClick={() => void onSendMessage(submitPayload)} disabled={!submitPayload.content}>
+              <Button size="sm" className="h-10 w-10 rounded-full p-0" onClick={() => void onSendMessage(submitPayload)} disabled={!submitPayload.content}>
                 <ArrowUp size={16} />
               </Button>
             </div>
           </div>
         </div>
-        <div className="mt-2 text-center text-[11px] text-slate-400">{settings.chatPreferences.enterToSend ? "Enter 发送 · Shift+Enter 换行" : "Enter 换行 · Shift+Enter 换行"}</div>
+        <div className="mt-2 text-center text-[11px] text-[color:var(--app-text-faint)]">{enterHintLabel(settings.chatPreferences.enterToSend)}</div>
       </div>
     </div>
   );
@@ -154,7 +141,7 @@ export function WorkspacePage({ catalog, controller, onOpenSettings, settings })
   }, [controller.running, settings.layoutPreferences.openInspectorOnTurn]);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-white text-slate-900">
+    <div className="flex h-screen overflow-hidden bg-[color:var(--app-canvas)] text-[color:var(--app-text)]">
       <div className="hidden h-full lg:block">
         <SessionSidebar activeSessionId={controller.session?.session_id} collapsed={sidebarCollapsed} groups={controller.sessionGroups} onDelete={controller.deleteSessionById} onNewChat={controller.startFreshSession} onOpenSettings={onOpenSettings} onSearchChange={controller.setSessionSearch} onSelect={(sessionId) => void controller.hydrateSession(sessionId)} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} sessionSearch={controller.sessionSearch} />
       </div>
@@ -165,8 +152,8 @@ export function WorkspacePage({ catalog, controller, onOpenSettings, settings })
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <WorkspaceHeader activeTurn={controller.activeTurn} canArchiveCurrentSession={controller.canArchiveCurrentSession} canDeleteCurrentSession={controller.canDeleteCurrentSession} currentTurn={controller.currentTurn} inspectorOpen={inspectorOpen} onDeleteSession={controller.deleteSessionById} onOpenPermissions={() => setPermissionsOpen(true)} onOpenSettings={onOpenSettings} onOpenSidebar={() => setSidebarOpen(true)} onStartFreshSession={controller.startFreshSession} onToggleArchive={() => void controller.toggleArchive()} onToggleInspector={() => setInspectorOpen((value) => !value)} permissionBadge={permissionCount > 0 ? permissionCount : null} session={controller.session} />
 
-          <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
-            <div className="flex-1 overflow-x-hidden overflow-y-auto px-4 py-6 md:px-6">
+          <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="flex-1 overflow-x-hidden overflow-y-auto px-3 py-5 md:px-6 md:py-6">
               {controller.primaryTimeline.length === 0 && controller.pendingApprovals.length === 0 ? (
                 <EmptyState />
               ) : (

@@ -107,20 +107,18 @@ test("buildPrimaryTimeline emits a chat-style conversation flow", () => {
   const timeline = buildPrimaryTimeline(messages, events, turns, true);
 
   assert.deepEqual(timeline.map((item) => item.type), [
-    "user_message",
-    "assistant_process",
-    "tool_action",
-    "tool_observation",
-    "participant_handoff",
-    "participant_message",
-    "approval_required",
-    "assistant_message",
+    "message",
+    "workflow",
+    "tool",
+    "agent",
+    "approval",
+    "message",
   ]);
-  assert.equal(timeline[1].data.detail, "先看页面。");
-  assert.equal(timeline[2].data.tool_name, "web_fetch");
-  assert.equal(timeline[3].data.source_host, "example.com");
-  assert.equal(timeline[6].data.approval_id, "apr-1");
-  assert.equal(timeline[7].data.message, "结论");
+  assert.equal(timeline[1].items[0].data.detail, "先看页面。");
+  assert.equal(timeline[2].items[0].data.tool_name, "web_fetch");
+  assert.equal(timeline[2].items[1].data.source_host, "example.com");
+  assert.equal(timeline[4].items[0].data.approval_id, "apr-1");
+  assert.equal(timeline[5].items[0].data.message, "结论");
 });
 
 test("buildPrimaryTimeline hides approval and notice cards when disabled", () => {
@@ -143,7 +141,7 @@ test("buildPrimaryTimeline hides approval and notice cards when disabled", () =>
     false,
   );
 
-  assert.deepEqual(timeline.map((item) => item.type), ["user_message"]);
+  assert.deepEqual(timeline.map((item) => item.type), ["message"]);
 });
 
 test("buildPrimaryTimeline suppresses chunk-only duplicates after final assistant reply", () => {
@@ -178,7 +176,7 @@ test("buildPrimaryTimeline suppresses chunk-only duplicates after final assistan
     true,
   );
 
-  assert.deepEqual(timeline.map((item) => item.type), ["user_message", "assistant_message"]);
+  assert.deepEqual(timeline.map((item) => item.type), ["message", "message"]);
 });
 
 test("buildPrimaryTimeline keeps live assistant process while turn is still active", () => {
@@ -202,9 +200,9 @@ test("buildPrimaryTimeline keeps live assistant process while turn is still acti
     { showKeySystemCards: true, activeTurnId: "turn-1" },
   );
 
-  assert.deepEqual(timeline.map((item) => item.type), ["user_message", "assistant_process", "assistant_process"]);
-  assert.equal(timeline[1].data.detail, "先整理上下文。");
-  assert.equal(timeline[2].data.detail, "再执行下一步。");
+  assert.deepEqual(timeline.map((item) => item.type), ["message", "workflow"]);
+  assert.equal(timeline[1].items[0].data.detail, "先整理上下文。");
+  assert.equal(timeline[1].items[1].data.detail, "再执行下一步。");
 });
 
 test("buildPrimaryTimeline keeps live assistant process merged across invisible same-second events", () => {
@@ -240,8 +238,8 @@ test("buildPrimaryTimeline keeps live assistant process merged across invisible 
     { showKeySystemCards: true, activeTurnId: "turn-1" },
   );
 
-  assert.deepEqual(timeline.map((item) => item.type), ["user_message", "assistant_process"]);
-  assert.equal(timeline[1].data.detail, "先整理线索，确认入口。");
+  assert.deepEqual(timeline.map((item) => item.type), ["message", "workflow"]);
+  assert.equal(timeline[1].items[0].data.detail, "先整理线索，确认入口。");
 });
 
 test("buildPrimaryTimeline keeps tool action ahead of matching observation for same-second events", () => {
@@ -284,7 +282,109 @@ test("buildPrimaryTimeline keeps tool action ahead of matching observation for s
     true,
   );
 
-  assert.deepEqual(timeline.map((item) => item.type), ["tool_action", "tool_observation"]);
-  assert.equal(timeline[0].data.tool_call_id, "call-1");
-  assert.equal(timeline[1].data.tool_call_id, "call-1");
+  assert.deepEqual(timeline.map((item) => item.type), ["tool"]);
+  assert.equal(timeline[0].items[0].data.tool_call_id, "call-1");
+  assert.equal(timeline[0].items[1].data.tool_call_id, "call-1");
+});
+
+test("buildPrimaryTimeline only classifies skill and mcp usage when fields are explicit", () => {
+  const timeline = buildPrimaryTimeline(
+    [],
+    [
+      {
+        event_id: "evt-skill",
+        session_id: "sess-1",
+        turn_id: "turn-1",
+        type: "langgraph_tasks",
+        created_at: "2026-04-17T10:00:01Z",
+        data: {
+          payload: {
+            name: "model",
+            result: {
+              messages: [{
+                content: "应用界面加固",
+                tool_calls: [{ id: "call-skill", name: "tool_router", args: { skill_name: "harden" } }],
+              }],
+            },
+          },
+        },
+      },
+      {
+        event_id: "evt-mcp",
+        session_id: "sess-1",
+        turn_id: "turn-1",
+        type: "tool_result",
+        created_at: "2026-04-17T10:00:02Z",
+        data: {
+          tool_call_id: "call-mcp",
+          tool_name: "stitch",
+          summary: "MCP server 返回结果",
+          source: { kind: "mcp", server_id: "stitch" },
+        },
+      },
+      {
+        event_id: "evt-generic",
+        session_id: "sess-1",
+        turn_id: "turn-1",
+        type: "tool_result",
+        created_at: "2026-04-17T10:00:03Z",
+        data: {
+          tool_call_id: "call-generic",
+          tool_name: "execute",
+          summary: "命令执行成功",
+        },
+      },
+    ],
+    [],
+    true,
+  );
+
+  assert.deepEqual(timeline.map((item) => item.type), ["skill", "mcp", "tool"]);
+});
+
+test("buildPrimaryTimeline renders non-root assistant messages as agent activity", () => {
+  const timeline = buildPrimaryTimeline(
+    [{
+      message_id: "msg-agent",
+      session_id: "sess-1",
+      turn_id: "turn-1",
+      role: "assistant",
+      speaker_profile: "hephaestus-deepworker",
+      content: "子 Agent 已完成代码检查。",
+      created_at: "2026-04-17T10:00:01Z",
+      evidence_refs: [],
+      artifact_refs: [],
+    }],
+    [],
+    [],
+    true,
+  );
+
+  assert.deepEqual(timeline.map((item) => item.type), ["agent"]);
+  assert.equal(timeline[0].speakerLabel, "hephaestus-deepworker");
+  assert.equal(timeline[0].items[0].data.message, "子 Agent 已完成代码检查。");
+});
+
+test("buildPrimaryTimeline keeps approval resolution notices in approval groups", () => {
+  const timeline = buildPrimaryTimeline(
+    [],
+    [{
+      event_id: "evt-approval-resolved",
+      session_id: "sess-1",
+      turn_id: "turn-1",
+      type: "approval_resolved",
+      created_at: "2026-04-17T10:00:01Z",
+      data: {
+        approval_id: "apr-1",
+        status: "approved",
+        summary: "审批已通过，继续执行。",
+      },
+    }],
+    [],
+    true,
+  );
+
+  assert.deepEqual(timeline.map((item) => item.type), ["approval"]);
+  assert.equal(timeline[0].items[0].type, "approval_notice");
+  assert.equal(timeline[0].items[0].data.state, "resolved");
 });

@@ -1,5 +1,6 @@
 import { compactText } from "./chat-utils.js";
 import { buildConversationItems, KEY_SYSTEM_CONVERSATION_ITEM_TYPES, PRIMARY_CONVERSATION_ITEM_TYPES } from "./conversation-items.js";
+import { statusLabel } from "./ui-copy.js";
 
 export const KEY_CHAT_EVENT_TYPES = KEY_SYSTEM_CONVERSATION_ITEM_TYPES;
 
@@ -41,20 +42,20 @@ export const systemEventLabels = {
   plan: "任务规划",
   task_node_started: "步骤开始",
   task_node_completed: "步骤完成",
-  task_node_waiting_approval: "步骤等待审批",
+  task_node_waiting_approval: "步骤等待确认",
   task_node_waiting_user_input: "步骤等待补充",
-  graph_op_applied: "Workflow 更新",
-  awaiting_approval: "等待审批",
-  approval_required: "等待审批",
-  approval_resolved: "审批完成",
-  approval_superseded: "审批已被替代",
+  graph_op_applied: "执行流程更新",
+  awaiting_approval: "等待确认",
+  approval_required: "等待确认",
+  approval_resolved: "确认已处理",
+  approval_superseded: "确认已被替代",
   tool_result: "工具结果",
   evidence_added: "新增证据",
   subagent: "子 Agent",
   aggregate: "汇总",
   report_ready: "报告生成",
   export: "导出完成",
-  approval_expired: "审批过期",
+  approval_expired: "确认已过期",
   awaiting_user_input: "等待补充信息",
   completed: "执行完成",
   failed: "执行失败",
@@ -95,26 +96,26 @@ export function eventSummary(item) {
     return compactText(data.preview || "已记录助手答复", 120);
   }
   if (item.type === "turn_terminal_recorded") {
-    const status = data.status ? String(data.status).replaceAll("_", " ") : "completed";
+    const status = statusLabel(data.status || "completed");
     return `执行结束 · ${status}`;
   }
   if (item.type === "plan") {
-    return `已生成 ${data.nodes?.length || 0} 个 workflow 步骤`;
+    return `已生成 ${data.nodes?.length || 0} 个执行步骤`;
   }
   if (item.type === "task_node_started" || item.type === "task_node_completed") {
     return data.title || data.node_id || systemEventLabels[item.type];
   }
   if (item.type === "task_node_waiting_approval") {
-    return data.reason || "步骤等待审批";
+    return data.reason || "步骤等待确认";
   }
   if (item.type === "task_node_waiting_user_input" || item.type === "awaiting_user_input") {
     return data.question || data.prompt || "等待补充信息";
   }
   if (item.type === "awaiting_approval") {
-    return `等待审批${Array.isArray(data.approval_ids) && data.approval_ids.length ? ` (${data.approval_ids.length})` : ""}`;
+    return `等待确认${Array.isArray(data.approval_ids) && data.approval_ids.length ? `（${data.approval_ids.length} 项）` : ""}`;
   }
   if (item.type === "graph_op_applied") {
-    return data.op_type || "工作流已更新";
+    return data.op_type || "执行流程已更新";
   }
   if (item.type === "tool_result") {
     return data.summary || data.title || "工具执行完成";
@@ -129,7 +130,7 @@ export function eventSummary(item) {
     return data.summary || "已完成阶段汇总";
   }
   if (item.type === "report_ready") {
-    return `报告 ${data.report_id || ""} 已生成`;
+    return data.report_id ? `结果报告 ${data.report_id} 已生成` : "结果报告已生成";
   }
   if (item.type === "export") {
     return "导出已完成";
@@ -141,16 +142,16 @@ export function eventSummary(item) {
     return data.error || "本轮执行失败";
   }
   if (item.type === "approval_expired") {
-    return data.reason || "审批已过期";
+    return data.reason || "确认已过期";
   }
   if (item.type === "timed_out") {
     return data.reason || "本轮执行超时";
   }
   if (item.type === "approval_resolved") {
-    return data.status === "approved" ? "审批已通过，继续执行" : "审批已拒绝";
+    return data.status === "approved" ? "已批准，执行继续" : "已拒绝，本次执行不会继续";
   }
   if (item.type === "approval_superseded") {
-    return data.reason || "当前审批已被新的动作替代";
+    return data.reason || "当前确认已被新的动作替代";
   }
   if (item.type === "cancelled") {
     return "本轮执行已取消";

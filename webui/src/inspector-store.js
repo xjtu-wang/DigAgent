@@ -179,10 +179,10 @@ export function buildInspectorGraph(turn, messages = []) {
 
   nodes.push(buildNode({
     node_id: `turn-output-${turn.turn_id}`,
-    title: turn.status === "failed" ? "执行失败" : turn.status === "awaiting_approval" ? "等待审批" : turn.status === "awaiting_user_input" ? "等待补充" : "最终结果",
+    title: turn.status === "failed" ? "执行失败" : turn.status === "awaiting_approval" ? "等待确认" : turn.status === "awaiting_user_input" ? "等待补充" : "最终结果",
     kind: "report",
     status: nodeStatus,
-    description: responseText || "当前没有持久化的中间 workflow 节点记录。",
+    description: responseText || "当前没有持久化的中间执行流程记录。",
     summary: compactText(turnResultSummary(turn, assistantMessage), 220),
     depends_on: previousNodeId ? [previousNodeId] : [],
     metadata: {
@@ -195,7 +195,7 @@ export function buildInspectorGraph(turn, messages = []) {
     },
   }));
 
-  return finalizedGraph({ turn_id: turn.turn_id, planning_state: "complete", graph_version: 1, nodes, applied_ops: [] }, "durable_trace", "基于持久化记录重建");
+  return finalizedGraph({ turn_id: turn.turn_id, planning_state: "complete", graph_version: 1, nodes, applied_ops: [] }, "durable_trace", "基于已保存记录重建");
 }
 
 function buildDerivedActivityEvents(turns, messages) {

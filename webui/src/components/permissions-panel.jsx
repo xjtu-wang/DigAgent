@@ -9,19 +9,20 @@ import {
   setBudget,
   setRule,
 } from "../permissions-store";
+import { notInProfileLabel, permissionRuleLabel, profileSummaryLabel } from "../ui-copy";
 import { Badge, Button, Input, SectionLabel, Toggle } from "./ui";
 
 const TOOL_RULES = [
-  { value: "inherit", label: "Inherit" },
-  { value: "allow", label: "Allow" },
-  { value: "confirm", label: "Confirm" },
-  { value: "deny", label: "Deny" },
+  { value: "inherit", label: permissionRuleLabel("inherit") },
+  { value: "allow", label: permissionRuleLabel("allow") },
+  { value: "confirm", label: permissionRuleLabel("confirm") },
+  { value: "deny", label: permissionRuleLabel("deny") },
 ];
 
 const MCP_RULES = [
-  { value: "inherit", label: "Inherit" },
-  { value: "allow", label: "Allow" },
-  { value: "deny", label: "Deny" },
+  { value: "inherit", label: permissionRuleLabel("inherit") },
+  { value: "allow", label: permissionRuleLabel("allow") },
+  { value: "deny", label: permissionRuleLabel("deny") },
 ];
 
 function RuleRow({ label, description, badge, rule, onChange, options }) {
@@ -75,7 +76,7 @@ function useToolCatalog(catalog, profile) {
       });
     });
     ["delegate_subagent", "skill_consult", "report_export"].forEach((name) => {
-      addEntry({ name, description: "System action", risk_tags: [], origin: "system" });
+      addEntry({ name, description: "系统操作", risk_tags: [], origin: "system" });
     });
     const allowset = new Set(profile?.tool_allowlist || []);
     return Array.from(seen.values())
@@ -150,7 +151,7 @@ export function PermissionsPanel({ catalog, controller, onClose, open }) {
           </div>
           <div className="mt-1 text-xs text-slate-500">
             {hasSession
-              ? `Profile: ${profileName} · 已自定义 ${overrideCount} 条规则`
+              ? profileSummaryLabel(profileName, overrideCount)
               : "先打开或创建一个会话再配置权限。"}
           </div>
         </div>
@@ -184,14 +185,14 @@ export function PermissionsPanel({ catalog, controller, onClose, open }) {
             <Toggle
               checked={overrides.auto_approve}
               onChange={(value) => updateOverrides(setAutoApprove(overrides, value))}
-              label="会话级自动批准"
-              description="开启后，本会话内后续需要确认的 action 都会自动通过。修改后需要点击上方“保存到会话”才会真正生效。"
+              label="自动确认审批"
+              description="开启后，本会话后续需要确认的操作会自动通过。修改后需要点击上方“保存到会话”才会真正生效。"
             />
             <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-sm font-medium text-slate-900">预算覆盖</div>
-                  <div className="mt-1 text-xs text-slate-500">留空沿用 profile。超过上限将直接 DENY。</div>
+                  <div className="mt-1 text-xs text-slate-500">留空则沿用当前执行配置。超过上限的操作会被直接拒绝。</div>
                 </div>
                 {overrides.budget_override ? (
                   <Button size="sm" variant="ghost" onClick={() => updateOverrides(setBudget(overrides, null))}>
@@ -201,7 +202,7 @@ export function PermissionsPanel({ catalog, controller, onClose, open }) {
               </div>
               <div className="mt-3 grid grid-cols-2 gap-3">
                 <label className="text-xs text-slate-500">
-                  <div className="mb-1">max_tool_calls</div>
+                  <div className="mb-1">最多工具调用次数</div>
                   <Input
                     type="number"
                     min={0}
@@ -218,7 +219,7 @@ export function PermissionsPanel({ catalog, controller, onClose, open }) {
                   />
                 </label>
                 <label className="text-xs text-slate-500">
-                  <div className="mb-1">max_runtime_seconds</div>
+                  <div className="mb-1">最长运行时间（秒）</div>
                   <Input
                     type="number"
                     min={0}
@@ -242,14 +243,14 @@ export function PermissionsPanel({ catalog, controller, onClose, open }) {
         <section>
           <div className="flex items-center justify-between">
             <SectionLabel>风险标签</SectionLabel>
-            <div className="text-xs text-slate-400">命中多条以最严格为准</div>
+            <div className="text-xs text-slate-400">命中多条时以最严格规则为准</div>
           </div>
           <div className="mt-2 space-y-2">
             {DEFAULT_RISK_TAGS.map((tag) => (
               <RuleRow
                 key={tag}
                 label={tag}
-                description="影响所有携带该标签的工具/动作。"
+                description="影响所有带有该标签的工具或动作。"
                 rule={overrides.risk_tag_rules[tag] || "inherit"}
                 onChange={(value) => updateOverrides(setRule(overrides, "risk_tag_rules", tag, value))}
                 options={TOOL_RULES}
@@ -275,7 +276,7 @@ export function PermissionsPanel({ catalog, controller, onClose, open }) {
                 onChange={(value) => updateOverrides(setRule(overrides, "mcp_server_rules", server.server_id, value))}
                 options={MCP_RULES}
                 badge={profile && !profile.mcp_server_allowlist?.includes(server.server_id) ? (
-                  <Badge className="bg-amber-100 text-[10px] text-amber-700">Not in profile</Badge>
+                  <Badge className="bg-amber-100 text-[10px] text-amber-700">{notInProfileLabel()}</Badge>
                 ) : null}
               />
             ))}
@@ -285,7 +286,7 @@ export function PermissionsPanel({ catalog, controller, onClose, open }) {
         <section>
           <div className="flex items-center justify-between">
             <SectionLabel>工具</SectionLabel>
-            <div className="text-xs text-slate-400">覆盖 profile 允许清单</div>
+            <div className="text-xs text-slate-400">覆盖执行配置中的默认允许列表</div>
           </div>
           <div className="mt-2 space-y-2">
             {tools.map((tool) => (
@@ -304,7 +305,7 @@ export function PermissionsPanel({ catalog, controller, onClose, open }) {
                         ))
                       : null}
                     {!tool.in_profile ? (
-                      <Badge className="bg-amber-100 text-[10px] text-amber-700">Not in profile</Badge>
+                      <Badge className="bg-amber-100 text-[10px] text-amber-700">{notInProfileLabel()}</Badge>
                     ) : null}
                   </>
                 }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildTurnTimelineEntries, normalizeTurnEvent, normalizeTurns, turnRecentActionSummary, turnResultSummary } from "./turn-utils.js";
+import { buildTurnTimelineEntries, normalizeTurnEvent, normalizeTurns, turnRecentActionSummary, turnResultSummary, turnStatusLabel } from "./turn-utils.js";
 
 test("normalizeTurns sorts newest turn first and preserves arrays", () => {
   const turns = normalizeTurns([
@@ -34,4 +34,10 @@ test("buildTurnTimelineEntries produces a summarized execution card", () => {
   assert.equal(entries[0].data.goal, "检查仓库");
   assert.equal(entries[0].data.action_summary, "扫描了 12 个文件");
   assert.equal(entries[0].data.evidence_count, 1);
+  assert.equal(entries[0].data.status_label, "已完成");
+});
+
+test("turnStatusLabel exposes user-facing labels", () => {
+  assert.equal(turnStatusLabel("awaiting_approval"), "等待确认");
+  assert.equal(turnStatusLabel("timed_out"), "执行超时");
 });

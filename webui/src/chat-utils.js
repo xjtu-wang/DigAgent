@@ -1,5 +1,10 @@
-const MIDDLEWARE_SUMMARIES = { "MemoryMiddleware.before_agent": "准备长期记忆与项目约束，让主 agent 在执行前拿到持久上下文。", "SkillsMiddleware.before_agent": "收集可用 skill 与说明，决定本轮可调用的技能上下文。", "PatchToolCallsMiddleware.before_agent": "整理模型产出的工具调用结构，避免把内部消息直接当作真实工具步骤。", "TodoListMiddleware.after_model": "同步任务清单状态，记录规划或执行后的任务变化。" };
-const KIND_LABELS = { input: "输入", tool: "工具", reasoning: "模型推理", system: "中间件", subagent: "子 Agent", report: "汇总", aggregate: "聚合" };
+const MIDDLEWARE_SUMMARIES = {
+  "MemoryMiddleware.before_agent": "系统会先准备长期记忆和项目约束，为本轮任务补齐上下文。",
+  "SkillsMiddleware.before_agent": "系统会整理当前可用的 Skill，帮助本轮任务选择合适能力。",
+  "PatchToolCallsMiddleware.before_agent": "系统会整理工具调用结构，确保后续步骤可以稳定执行。",
+  "TodoListMiddleware.after_model": "系统会同步任务清单状态，记录规划和执行进度。",
+};
+const KIND_LABELS = { input: "输入", tool: "工具", reasoning: "思考", system: "系统", subagent: "Agent", report: "结果", aggregate: "步骤" };
 export const graphNodeStyles = { pending: "border-slate-200 bg-white text-slate-500", ready: "border-slate-300 bg-slate-50 text-slate-700", running: "border-emerald-300 bg-emerald-50 text-emerald-800 shadow-[0_16px_45px_rgba(22,101,52,0.12)]", waiting_approval: "border-orange-300 bg-orange-50 text-orange-800 shadow-[0_16px_45px_rgba(251,146,60,0.12)]", waiting_user_input: "border-amber-300 bg-amber-50 text-amber-900 shadow-[0_16px_45px_rgba(245,158,11,0.12)]", blocked: "border-orange-300 bg-orange-50 text-orange-800 shadow-[0_16px_45px_rgba(251,146,60,0.12)]", completed: "border-slate-300 bg-slate-50 text-slate-600", failed: "border-rose-300 bg-rose-50 text-rose-800", timed_out: "border-amber-400 bg-amber-100 text-amber-900", deprecated: "border-slate-300 bg-slate-100 text-slate-500" };
 export const statusStyles = { idle: "bg-slate-100 text-slate-700", active_turn: "bg-emerald-100 text-emerald-800", active_run: "bg-emerald-100 text-emerald-800", awaiting_approval: "bg-orange-100 text-orange-800", awaiting_user_input: "bg-amber-100 text-amber-900", archived: "bg-slate-200 text-slate-700", completed: "bg-slate-100 text-slate-700", failed: "bg-rose-100 text-rose-700", timed_out: "bg-amber-100 text-amber-900", cancelled: "bg-slate-200 text-slate-600", running: "bg-emerald-100 text-emerald-800" };
 
@@ -139,7 +144,7 @@ function displayTitle(node, semanticKind, toolObservation) {
     return humanizeName(rawTitle.replaceAll(".", " "));
   }
   if (semanticKind === "reasoning") {
-    return rawTitle === "model" ? "模型推理" : rawTitle;
+    return rawTitle === "model" ? "模型思考" : rawTitle;
   }
   if (semanticKind === "tool" && toolObservation?.title) {
     return toolObservation.title;
@@ -148,13 +153,13 @@ function displayTitle(node, semanticKind, toolObservation) {
 }
 function nodeSummary(node, semanticKind, messages, toolObservation) {
   if (semanticKind === "system") {
-    return MIDDLEWARE_SUMMARIES[node?.title] || "内部运行时步骤，用来注入上下文、整理调用或同步执行状态。";
+    return MIDDLEWARE_SUMMARIES[node?.title] || "系统正在整理上下文或同步执行状态。";
   }
   if (semanticKind === "tool") {
     return toolObservation?.summary || "工具完成了一次外部观察或操作。";
   }
   if (semanticKind === "reasoning") {
-    return compactText(messageText(latestMessage(messages, ["ai"])) || node?.summary || node?.description || "模型生成了下一步计划或答复。", 180);
+    return compactText(messageText(latestMessage(messages, ["ai"])) || node?.summary || node?.description || "系统正在生成下一步计划或答复。", 180);
   }
   if (semanticKind === "input") {
     return compactText(node?.description || node?.summary || "收到新的用户目标。", 180);
@@ -239,7 +244,7 @@ export function projectWorkflowNode(node, nodeEvents = [], index = 0) {
     lastEventSummary: summary,
     detailSections: nodeDetailSections(node, semanticKind, summary, toolObservation),
     metadataBadges: nodeMetadataBadges(node, semanticKind, toolObservation),
-    debugLabel: semanticKind === "tool" ? "工具原始输出" : "节点原始数据",
+    debugLabel: semanticKind === "tool" ? "工具详情" : "步骤原始数据",
     debugPayload: nodeDebugPayload(node, payload, toolObservation),
   };
 }
