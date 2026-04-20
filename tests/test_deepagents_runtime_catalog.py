@@ -22,7 +22,7 @@ EXPECTED_PROJECT_TOOLS = {
 
 def test_skill_and_memory_sources_use_agents_directory(test_settings) -> None:
     assert skill_source_paths(test_settings) == ["/.agents/skills"]
-    assert memory_source_paths(test_settings) == ["/.agents/memory/project.md"]
+    assert memory_source_paths(test_settings) == ["/.agents/memory/active.md", "/.agents/memory/project.md"]
 
 
 def test_project_tool_manifests_load_from_agents_directory(test_settings) -> None:
@@ -55,8 +55,9 @@ def test_interrupt_config_uses_manifest_defaults(test_settings) -> None:
 def test_turn_manager_catalog_exposes_agents_tools(test_settings) -> None:
     manager = TurnManager(test_settings)
     catalog = manager.catalog()
-    assert catalog["memory"] == ["/.agents/memory/project.md"]
+    assert catalog["memory"] == ["/.agents/memory/active.md", "/.agents/memory/project.md"]
     assert {item["name"] for item in catalog["tools"]} == EXPECTED_PROJECT_TOOLS
     assert any(item["name"] == "cve-intel" and item["path"] == "/.agents/skills/cve-intel" for item in catalog["skills"])
     assert any(item["name"] == "digagent-runtime" and item["path"] == "/.agents/skills/digagent-runtime" for item in catalog["skills"])
+    assert any(item["name"] == "report-delivery" and item["path"] == "/.agents/skills/report-delivery" for item in catalog["skills"])
     assert {item["server_id"] for item in catalog["mcp_servers"]} == {"fixture-mcp", "kali-local", "playwright-local"}

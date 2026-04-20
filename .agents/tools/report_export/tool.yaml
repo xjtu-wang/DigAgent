@@ -1,26 +1,35 @@
 name: report_export
-description: Export an existing DigAgent report as markdown or pdf and return the artifact path.
-version: 1
+description: Export an existing DigAgent report or ad hoc markdown as markdown or pdf and return a download target.
+version: 2
 function: run
 args_schema:
   type: object
   properties:
     report_id:
       type: string
+    title:
+      type: string
+    markdown:
+      type: string
     format:
       type: string
       enum: [markdown, pdf]
     include_content:
       type: boolean
-  required: [report_id]
 output_schema:
   type: object
   properties:
+    mode:
+      type: string
     report_id:
+      type: string
+    artifact_id:
       type: string
     format:
       type: string
     path:
+      type: string
+    download_url:
       type: string
     title:
       type: string

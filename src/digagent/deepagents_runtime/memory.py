@@ -11,7 +11,15 @@ PROJECT_MEMORY_FILES = {
 
 - DigAgent packages project-facing runtime capabilities through `/.agents/skills`, `/.agents/tools`, and `/.agents/memory`.
 - Temporary memory stays with session records for interruption recovery and should only be promoted here when it becomes durable.
+- Always-loaded long-term memory summaries live in `/.agents/memory/project.md` and `/.agents/memory/active.md`.
+- Detailed long-term memory belongs under `/.agents/memory/archive/*.md` instead of the always-loaded summary layer.
 - Project-specific capabilities should prefer manifest-backed tools instead of ad hoc shell glue.
+""",
+    "active.md": """# DigAgent Active Memory
+
+- Keep always-loaded long-term memory concise so runtime memory injection stays bounded.
+- Promote reusable project conventions and user preferences here first; move detailed knowledge into `/.agents/memory/archive/*.md` when the summary grows too large.
+- Use `report_export` for downloadable markdown or PDF deliverables when the user asks for exports or when a chat response would be too large.
 """
 }
 
@@ -23,6 +31,7 @@ def project_memory_root(settings: AppSettings | None = None) -> Path:
 
 def ensure_project_memory(settings: AppSettings | None = None) -> list[Path]:
     root = project_memory_root(settings)
+    (root / "archive").mkdir(parents=True, exist_ok=True)
     paths: list[Path] = []
     for name, content in PROJECT_MEMORY_FILES.items():
         path = root / name

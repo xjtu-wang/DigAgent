@@ -10,6 +10,7 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 from langchain_core.tools import StructuredTool
+from langchain_core.runnables import RunnableConfig
 from pydantic import Field, create_model
 
 from digagent.config import AppSettings, get_settings
@@ -116,7 +117,8 @@ def _build_project_tool(manifest: ToolManifest, context: ProjectToolContext) -> 
     tool_function = _load_tool_function(tool_dir / "script.py", manifest.function)
     args_schema = _build_args_schema(manifest)
     if inspect.iscoroutinefunction(tool_function):
-        async def _arun(**kwargs: Any) -> Any:
+        async def _arun(config: RunnableConfig, **kwargs: Any) -> Any:
+            kwargs["config"] = config
             return await _invoke_tool(tool_function, manifest, context, kwargs)
 
         tool = StructuredTool.from_function(
@@ -126,7 +128,8 @@ def _build_project_tool(manifest: ToolManifest, context: ProjectToolContext) -> 
             args_schema=args_schema,
         )
     else:
-        def _run(**kwargs: Any) -> Any:
+        def _run(config: RunnableConfig, **kwargs: Any) -> Any:
+            kwargs["config"] = config
             return _invoke_sync_tool(tool_function, manifest, context, kwargs)
 
         tool = StructuredTool.from_function(

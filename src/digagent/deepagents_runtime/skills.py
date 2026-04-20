@@ -19,14 +19,15 @@ description: DigAgent runtime conventions for .agents-based skills, tools, and m
 
 - Project skills live under `/.agents/skills/`.
 - Project tools are declared under `/.agents/tools/*/tool.yaml`.
-- Long-term memory lives under `/.agents/memory/*.md`.
+- Long-term memory summaries live under `/.agents/memory/*.md`.
+- Detailed long-term memory archives live under `/.agents/memory/archive/*.md`.
 
 ## Tooling
 
 - Prefer project tools when the capability already exists in `/.agents/tools`.
 - `ctf_orchestrator_inventory` inspects the bundled CTF sandbox orchestrator assets.
 - `vuln_kb_lookup` searches the local CVE knowledge base.
-- `report_export` exports an existing DigAgent report artifact.
+- `report_export` exports either an existing DigAgent report or ad hoc markdown into a downloadable artifact.
 
 ## MCP
 
@@ -35,16 +36,32 @@ description: DigAgent runtime conventions for .agents-based skills, tools, and m
 """,
     "memory-curation": """---
 name: memory-curation
-description: Curate durable user and project memory by promoting stable facts from session records into .agents memory files.
+description: Manage OpenClaw-style short-term and long-term memory, keeping durable knowledge in .agents/memory/.
 ---
 
 # Memory Curation
 
-## Promotion Rules
+## Memory Layers
 
 - Temporary notes stay in session records so turns can resume after interruption.
-- Promote durable user preferences, recurring repo conventions, and other high-value facts into `/.agents/memory/*.md`.
+- Long-term memory lives under `/.agents/memory/`.
+- Keep always-loaded summaries in `/.agents/memory/active.md`.
+- Store detailed long-term knowledge in `/.agents/memory/archive/*.md`.
 - Do not store secrets, access tokens, or noisy transient chat history in long-term memory.
+""",
+    "report-delivery": """---
+name: report-delivery
+description: Guide DigAgent to export markdown or PDF deliverables when the user asks for downloads or the response is too large for chat.
+recommended_tools:
+  - report_export
+---
+
+# Report Delivery
+
+- Prefer `markdown` by default when the user did not specify a format.
+- Use `pdf` when the user explicitly asks for it or the task clearly calls for a formal report artifact.
+- Export an existing report when one already exists; otherwise export finalized markdown directly.
+- Always return the download link from the tool output.
 """,
 }
 
