@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import suppress
 from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request
@@ -76,21 +77,13 @@ def create_app(manager: TurnManager | None = None) -> FastAPI:
     )
 
     def serialize_turn(turn, *, include_graph: bool = True):
-        exclude = None if include_graph else {"task_graph"}
-        payload = turn.model_dump(mode="json", exclude=exclude)
-        payload["pending_approvals"] = manager.pending_approvals_for_turn(turn.turn_id)
-        return payload
+        return manager.serialize_turn(turn, include_graph=include_graph)
 
     def serialize_session_summary(session):
-        payload = session.model_dump(mode="json")
-        payload["last_message_preview"] = payload.get("last_message_preview")
-        payload["pending_approval_count"] = len(session.pending_approval_ids)
-        return payload
+        return manager.serialize_session_summary(session)
 
     def serialize_session(session):
-        payload = serialize_session_summary(session)
-        payload["turns"] = [serialize_turn(turn, include_graph=False) for turn in manager.list_turns(session.session_id)]
-        return payload
+        return manager.serialize_session(session)
 
     def require_supported_session(session_id: str):
         try:
@@ -120,17 +113,32 @@ def create_app(manager: TurnManager | None = None) -> FastAPI:
         return event_types or None
 
     async def stream_event_payload(request: Request, events: AsyncIterator[Any]) -> AsyncIterator[str]:
-        while True:
-            if await request.is_disconnected():
-                return
-            try:
-                event = await asyncio.wait_for(events.__anext__(), timeout=SSE_HEARTBEAT_SEC)
-            except StopAsyncIteration:
-                return
-            except asyncio.TimeoutError:
-                yield ": keep-alive\n\n"
-                continue
-            yield f"data: {json.dumps(event.model_dump(mode='json'), ensure_ascii=False)}\n\n"
+        pending_next: asyncio.Task[Any] | None = None
+        try:
+            while True:
+                if await request.is_disconnected():
+                    return
+                if pending_next is None:
+                    pending_next = asyncio.create_task(events.__anext__())
+                done, _ = await asyncio.wait({pending_next}, timeout=SSE_HEARTBEAT_SEC)
+                if not done:
+                    yield ": keep-alive\n\n"
+                    continue
+                try:
+                    event = pending_next.result()
+                except StopAsyncIteration:
+                    return
+                pending_next = None
+                yield f"data: {json.dumps(event.model_dump(mode='json'), ensure_ascii=False)}\n\n"
+        finally:
+            if pending_next is not None and not pending_next.done():
+                pending_next.cancel()
+                with suppress(asyncio.CancelledError):
+                    await pending_next
+            aclose = getattr(events, "aclose", None)
+            if callable(aclose):
+                with suppress(RuntimeError, StopAsyncIteration):
+                    await aclose()
 
     async def stream_history_payload(request: Request, events: list[Any]) -> AsyncIterator[str]:
         for event in events:
@@ -169,6 +177,14 @@ def create_app(manager: TurnManager | None = None) -> FastAPI:
     @app.get("/api/sessions/{session_id}")
     async def get_session(session_id: str):
         return serialize_session(require_supported_session(session_id))
+
+    @app.get("/api/sessions/{session_id}/workspace")
+    async def get_session_workspace(session_id: str):
+        session = require_supported_session(session_id)
+        return {
+            "session": serialize_session(session),
+            "messages": [message.model_dump(mode="json") for message in manager.list_messages(session_id)],
+        }
 
     @app.patch("/api/sessions/{session_id}/scope")
     async def patch_session_scope(session_id: str, body: ScopeUpdateRequest):
@@ -262,14 +278,15 @@ def create_app(manager: TurnManager | None = None) -> FastAPI:
         return await manager.get_turn_graph(turn_id)
 
     @app.get("/api/turns/{turn_id}/events")
-    async def stream_turn_events(turn_id: str, request: Request, history_only: bool = False):
+    async def stream_turn_events(turn_id: str, request: Request, history_only: bool = False, event_types: str | None = None):
+        filtered_types = parse_event_types(event_types)
         if history_only:
             return StreamingResponse(
-                stream_history_payload(request, manager.load_turn_event_history(turn_id)),
+                stream_history_payload(request, manager.load_turn_event_history(turn_id, event_types=filtered_types)),
                 media_type="text/event-stream",
             )
         return StreamingResponse(
-            stream_event_payload(request, manager.stream_turn_events(turn_id)),
+            stream_event_payload(request, manager.stream_turn_events(turn_id, event_types=filtered_types)),
             media_type="text/event-stream",
         )
 

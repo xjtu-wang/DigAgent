@@ -26,6 +26,14 @@ test("filterActivityEvents keeps execution activity sorted by newest first", () 
   assert.deepEqual(filterActivityEvents(events).map((item) => item.event_id), ["newer", "older"]);
 });
 
+test("filterActivityEvents uses raw event order when timestamps tie", () => {
+  const events = [
+    { event_id: "evt-1", type: "tool_result", created_at: "2026-04-17T10:00:05Z", turn_event_index: 1 },
+    { event_id: "evt-2", type: "approval_required", created_at: "2026-04-17T10:00:05Z", turn_event_index: 2 },
+  ];
+  assert.deepEqual(filterActivityEvents(events).map((item) => item.event_id), ["evt-2", "evt-1"]);
+});
+
 test("mergeHistory emits a sequential process flow instead of a turn card", () => {
   const messages = [
     { message_id: "msg-user", session_id: "sess-1", turn_id: "turn-1", role: "user", content: "检查仓库", created_at: "2026-04-17T10:00:00Z", evidence_refs: [], artifact_refs: [] },

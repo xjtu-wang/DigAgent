@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Archive, ArrowUp, Settings2, ShieldCheck, SquarePen, XCircle } from "lucide-react";
 import { compactText } from "../chat-utils";
 import { collectComposerMentions, normalizeMentionAgents } from "../composer-utils";
@@ -128,6 +128,7 @@ export function WorkspacePage({ catalog, controller, onOpenSettings, settings })
   const [inspectorTab, setInspectorTab] = useState(settings.layoutPreferences.inspectorDefaultTab);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
   const permissionCount = useMemo(() => countOverrides(controller.permissionOverrides), [controller.permissionOverrides]);
+  const autoOpenStateRef = useRef({ ready: false, runningTurnId: null, sessionId: null });
 
   useEffect(() => {
     setSidebarCollapsed(settings.layoutPreferences.sidebarCollapsed);
@@ -135,22 +136,37 @@ export function WorkspacePage({ catalog, controller, onOpenSettings, settings })
   }, [settings.layoutPreferences.inspectorDefaultTab, settings.layoutPreferences.sidebarCollapsed]);
 
   useEffect(() => {
-    if (controller.running && settings.layoutPreferences.openInspectorOnTurn) {
+    const sessionId = controller.session?.session_id || null;
+    const runningTurnId = controller.running ? controller.activeTurn?.turn_id || null : null;
+    const previousState = autoOpenStateRef.current;
+    const shouldAutoOpen = previousState.ready
+      && settings.layoutPreferences.openInspectorOnTurn
+      && sessionId
+      && sessionId === previousState.sessionId
+      && runningTurnId
+      && runningTurnId !== previousState.runningTurnId
+      && controller.turns.length > 1;
+    if (shouldAutoOpen) {
       setInspectorOpen(true);
     }
-  }, [controller.running, settings.layoutPreferences.openInspectorOnTurn]);
+    autoOpenStateRef.current = { ready: true, runningTurnId, sessionId };
+  }, [controller.activeTurn?.turn_id, controller.running, controller.session?.session_id, controller.turns.length, settings.layoutPreferences.openInspectorOnTurn]);
+
+  useEffect(() => {
+    controller.setInspectorDemanded(inspectorOpen);
+  }, [controller, inspectorOpen]);
 
   return (
     <div className="flex h-screen overflow-hidden bg-[color:var(--app-canvas)] text-[color:var(--app-text)]">
       <div className="hidden h-full lg:block">
-        <SessionSidebar activeSessionId={controller.session?.session_id} collapsed={sidebarCollapsed} groups={controller.sessionGroups} onDelete={controller.deleteSessionById} onNewChat={controller.startFreshSession} onOpenSettings={onOpenSettings} onSearchChange={controller.setSessionSearch} onSelect={(sessionId) => void controller.hydrateSession(sessionId)} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} sessionSearch={controller.sessionSearch} />
+        <SessionSidebar activeSessionId={controller.session?.session_id} collapsed={sidebarCollapsed} groups={controller.sessionGroups} onDelete={controller.deleteSessionById} onNewChat={() => { setInspectorOpen(false); controller.startFreshSession(); }} onOpenSettings={onOpenSettings} onSearchChange={controller.setSessionSearch} onSelect={(sessionId) => void controller.hydrateSession(sessionId)} onToggleCollapsed={() => setSidebarCollapsed((value) => !value)} sessionSearch={controller.sessionSearch} />
       </div>
 
-      <MobileSidebar open={sidebarOpen} activeSessionId={controller.session?.session_id} groups={controller.sessionGroups} onClose={() => setSidebarOpen(false)} onDelete={controller.deleteSessionById} onNewChat={() => { controller.startFreshSession(); setSidebarOpen(false); }} onOpenSettings={() => { setSidebarOpen(false); onOpenSettings(); }} onSearchChange={controller.setSessionSearch} onSelect={(sessionId) => { setSidebarOpen(false); void controller.hydrateSession(sessionId); }} onToggleCollapsed={() => {}} sessionSearch={controller.sessionSearch} />
+      <MobileSidebar open={sidebarOpen} activeSessionId={controller.session?.session_id} groups={controller.sessionGroups} onClose={() => setSidebarOpen(false)} onDelete={controller.deleteSessionById} onNewChat={() => { setInspectorOpen(false); controller.startFreshSession(); setSidebarOpen(false); }} onOpenSettings={() => { setSidebarOpen(false); onOpenSettings(); }} onSearchChange={controller.setSessionSearch} onSelect={(sessionId) => { setSidebarOpen(false); void controller.hydrateSession(sessionId); }} onToggleCollapsed={() => {}} sessionSearch={controller.sessionSearch} />
 
       <div className="flex min-w-0 flex-1 overflow-hidden">
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <WorkspaceHeader activeTurn={controller.activeTurn} canArchiveCurrentSession={controller.canArchiveCurrentSession} canDeleteCurrentSession={controller.canDeleteCurrentSession} currentTurn={controller.currentTurn} inspectorOpen={inspectorOpen} onDeleteSession={controller.deleteSessionById} onOpenPermissions={() => setPermissionsOpen(true)} onOpenSettings={onOpenSettings} onOpenSidebar={() => setSidebarOpen(true)} onStartFreshSession={controller.startFreshSession} onToggleArchive={() => void controller.toggleArchive()} onToggleInspector={() => setInspectorOpen((value) => !value)} permissionBadge={permissionCount > 0 ? permissionCount : null} session={controller.session} />
+          <WorkspaceHeader activeTurn={controller.activeTurn} canArchiveCurrentSession={controller.canArchiveCurrentSession} canDeleteCurrentSession={controller.canDeleteCurrentSession} currentTurn={controller.currentTurn} inspectorOpen={inspectorOpen} onDeleteSession={controller.deleteSessionById} onOpenPermissions={() => setPermissionsOpen(true)} onOpenSettings={onOpenSettings} onOpenSidebar={() => setSidebarOpen(true)} onStartFreshSession={() => { setInspectorOpen(false); controller.startFreshSession(); }} onToggleArchive={() => void controller.toggleArchive()} onToggleInspector={() => setInspectorOpen((value) => !value)} permissionBadge={permissionCount > 0 ? permissionCount : null} session={controller.session} />
 
           <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
             <div className="flex-1 overflow-x-hidden overflow-y-auto px-3 py-5 md:px-6 md:py-6">

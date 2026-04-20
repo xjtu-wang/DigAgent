@@ -32,7 +32,15 @@ test("buildInspectorGraph reconstructs durable workflow nodes when task graph is
 
 test("buildInspectorActivityEvents merges durable execution milestones", () => {
   const events = buildInspectorActivityEvents([], [baseTurn], messages);
-  assert.deepEqual(events.map((item) => item.type), ["assistant_response_recorded", "turn_terminal_recorded", "turn_recorded", "user_task_recorded"]);
+  assert.deepEqual(events.map((item) => item.type), ["turn_terminal_recorded", "assistant_response_recorded", "user_task_recorded", "turn_recorded"]);
+});
+
+test("buildInspectorActivityEvents keeps same-timestamp events in raw sequence order", () => {
+  const events = buildInspectorActivityEvents([
+    { event_id: "evt-2", turn_id: "turn_demo", type: "approval_required", created_at: "2026-04-18T12:00:02Z", turn_event_index: 2, data: { approval_id: "apr-1" } },
+    { event_id: "evt-1", turn_id: "turn_demo", type: "tool_result", created_at: "2026-04-18T12:00:02Z", turn_event_index: 1, data: { tool_name: "read_file" } },
+  ], [baseTurn], messages, "turn_demo");
+  assert.ok(events.findIndex((item) => item.event_id === "evt-2") < events.findIndex((item) => item.event_id === "evt-1"));
 });
 
 test("buildTurnInspectorStats derives truthful metrics from turn records", () => {

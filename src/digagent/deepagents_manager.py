@@ -45,6 +45,56 @@ class TurnManager(TurnManagerOpsMixin):
         self._runtimes: dict[str, Any] = {}
         self._pending_approvals: dict[str, Any] = {}
         self._title_tasks: dict[str, asyncio.Task[None]] = {}
+        self._session_live_subscribers: dict[str, list[tuple[asyncio.Queue[Any], set[str] | None]]] = {}
+        self._turn_live_subscribers: dict[str, list[tuple[asyncio.Queue[Any], set[str] | None]]] = {}
+
+    def _publish_live_event(self, event) -> None:
+        self._fan_out_live_event(self._session_live_subscribers.get(event.session_id, []), event)
+        if event.turn_id:
+            self._fan_out_live_event(self._turn_live_subscribers.get(event.turn_id, []), event)
+
+    def _fan_out_live_event(self, subscribers: list[tuple[asyncio.Queue[Any], set[str] | None]], event) -> None:
+        if not subscribers:
+            return
+        stale: list[tuple[asyncio.Queue[Any], set[str] | None]] = []
+        for queue, event_types in list(subscribers):
+            if event_types and event.type not in event_types:
+                continue
+            try:
+                queue.put_nowait(event)
+            except RuntimeError:
+                stale.append((queue, event_types))
+        for subscriber in stale:
+            with suppress(ValueError):
+                subscribers.remove(subscriber)
+
+    async def _stream_live_session_events(self, session_id: str, *, event_types: set[str] | None = None):
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+        subscribers = self._session_live_subscribers.setdefault(session_id, [])
+        subscriber = (queue, event_types)
+        subscribers.append(subscriber)
+        try:
+            while True:
+                yield await queue.get()
+        finally:
+            with suppress(ValueError):
+                subscribers.remove(subscriber)
+            if not subscribers:
+                self._session_live_subscribers.pop(session_id, None)
+
+    async def _stream_live_turn_events(self, turn_id: str, *, event_types: set[str] | None = None):
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+        subscribers = self._turn_live_subscribers.setdefault(turn_id, [])
+        subscriber = (queue, event_types)
+        subscribers.append(subscriber)
+        try:
+            while True:
+                yield await queue.get()
+        finally:
+            with suppress(ValueError):
+                subscribers.remove(subscriber)
+            if not subscribers:
+                self._turn_live_subscribers.pop(turn_id, None)
 
     async def handle_message(
         self,
@@ -176,7 +226,9 @@ class TurnManager(TurnManagerOpsMixin):
         turn = self.storage.find_turn(turn.turn_id)
         turn.approval_ids = [item for item in turn.approval_ids if item != approval_id]
         self.storage.save_turn(turn)
-        self.storage.update_session(turn.session_id, lambda item: _drop_pending_approval(item, approval_id))
+        session = self.storage.update_session(turn.session_id, lambda item: _drop_pending_approval(item, approval_id))
+        self._emit_turn_updated(turn)
+        self._emit_session_updated(session.session_id)
         if snapshot is not None:
             self._resolve_snapshot(self.storage.load_session(turn.session_id), turn, snapshot)
         return approval

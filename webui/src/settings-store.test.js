@@ -22,6 +22,7 @@ test("normalizeAppSettings merges partial payloads with defaults", () => {
   assert.equal(settings.runtimeDefaults.profile, "hephaestus-deepworker");
   assert.equal(settings.chatPreferences.enterToSend, false);
   assert.equal(settings.layoutPreferences.inspectorDefaultTab, "workflow");
+  assert.equal(settings.layoutPreferences.openInspectorOnTurn, false);
   assert.equal(settings.workflowPreferences.focusActiveOnUpdate, true);
 });
 

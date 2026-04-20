@@ -16,7 +16,7 @@ export const DEFAULT_APP_SETTINGS = Object.freeze({
   layoutPreferences: {
     sidebarCollapsed: false,
     inspectorDefaultTab: "workflow",
-    openInspectorOnTurn: true,
+    openInspectorOnTurn: false,
   },
   workflowPreferences: {
     focusActiveOnOpen: true,

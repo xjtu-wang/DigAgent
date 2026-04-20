@@ -199,22 +199,13 @@ async def test_stream_events_defaults_to_tail_only(manager) -> None:
 
     async def append_new_event() -> None:
         await asyncio.sleep(0.05)
-        manager.storage.append_turn_event(
-            session.session_id,
-            TurnEvent(
-                event_id="evt_new",
-                session_id=session.session_id,
-                turn_id=turn.turn_id,
-                type="completed",
-                data={"turn_id": turn.turn_id},
-                created_at="2026-04-19T00:00:01Z",
-            ),
-        )
+        manager._emit(session.session_id, turn.turn_id, "completed", {"turn_id": turn.turn_id})
 
     append_task = asyncio.create_task(append_new_event())
     event = await asyncio.wait_for(anext(stream), timeout=0.3)
     await append_task
-    assert event.event_id == "evt_new"
+    assert event.type == "completed"
+    assert event.event_id != "evt_existing"
 
 
 @pytest.mark.asyncio

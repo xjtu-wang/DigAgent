@@ -5,26 +5,8 @@ import { emptyOverrides, normalizePermissionOverrides } from "./permissions-stor
 import { buildPrimaryTimeline } from "./semantic-timeline.js";
 import { createRuntimeDraft } from "./settings-store.js";
 import { filterActivityEvents } from "./timeline-utils.js";
-import { normalizeTurnEvent, normalizeTurns, TERMINAL_TURN_STATUSES } from "./turn-utils.js";
+import { normalizeTurn, normalizeTurnEvent, normalizeTurns, TERMINAL_TURN_STATUSES } from "./turn-utils.js";
 
-const SESSION_REFRESH_EVENT_TYPES = new Set([
-  "assistant_message",
-  "approval_required",
-  "approval_resolved",
-  "approval_expired",
-  "approval_superseded",
-  "awaiting_approval",
-  "awaiting_user_input",
-  "completed",
-  "failed",
-  "timed_out",
-  "cancelled",
-  "report_ready",
-  "turn_started",
-  "turn_status",
-  "turn_updated",
-  "turn_recorded",
-]);
 const PRIMARY_TIMELINE_EVENT_TYPES = [
   "assistant_chunk",
   "langgraph_tasks",
@@ -40,6 +22,29 @@ const PRIMARY_TIMELINE_EVENT_TYPES = [
   "timed_out",
   "cancelled",
   "awaiting_user_input",
+];
+const SESSION_LIVE_EVENT_TYPES = [
+  ...PRIMARY_TIMELINE_EVENT_TYPES,
+  "assistant_message",
+  "session_title_updated",
+  "session_permissions_updated",
+  "session_updated",
+  "turn_updated",
+];
+const TURN_DETAIL_EVENT_TYPES = [
+  ...PRIMARY_TIMELINE_EVENT_TYPES,
+  "awaiting_approval",
+  "completed",
+  "turn_superseded",
+  "task_node_started",
+  "task_node_completed",
+  "task_node_waiting_approval",
+  "task_node_waiting_user_input",
+  "graph_op_applied",
+  "aggregate",
+  "evidence_added",
+  "report_ready",
+  "export",
 ];
 
 async function readJson(response) {
@@ -104,17 +109,13 @@ function applySessionTitleUpdate(current, payload) {
 }
 
 function applySessionSummaryTitleUpdate(sessions, payload) {
-  return sessions.map((item) => item.session_id === payload.session_id ? {
-    ...item,
-    title: payload.data?.title || item.title,
-    title_status: payload.data?.title_status || item.title_status,
-    title_source: payload.data?.title_source || item.title_source,
-    updated_at: payload.created_at || item.updated_at,
-  } : item);
-}
-
-function shouldRefreshSession(payload) {
-  return SESSION_REFRESH_EVENT_TYPES.has(payload.type);
+  return upsertSessionSummary(sessions, {
+    session_id: payload.session_id,
+    title: payload.data?.title,
+    title_status: payload.data?.title_status,
+    title_source: payload.data?.title_source,
+    updated_at: payload.created_at,
+  });
 }
 
 function selectCurrentTurn(turns, focusTurnId, activeTurnId) {
@@ -168,20 +169,57 @@ function mergeUniqueEvents(current, incoming) {
   return merged;
 }
 
-function combineLoadedEvents(sessionEvents, turnDetailsById) {
-  let merged = mergeUniqueEvents([], sessionEvents);
-  for (const detail of Object.values(turnDetailsById || {})) {
-    if (!detail?.events?.length) {
-      continue;
-    }
-    merged = mergeUniqueEvents(merged, detail.events);
-  }
-  return merged;
+function encodeEventTypes(types) {
+  return encodeURIComponent(types.join(","));
 }
 
-function sessionHistoryUrl(sessionId) {
-  const types = encodeURIComponent(PRIMARY_TIMELINE_EVENT_TYPES.join(","));
-  return `/api/sessions/${sessionId}/events?history_only=true&event_types=${types}`;
+function sessionLiveUrl(sessionId) {
+  return `/api/sessions/${sessionId}/events?event_types=${encodeEventTypes(SESSION_LIVE_EVENT_TYPES)}`;
+}
+
+function turnDetailHistoryUrl(turnId) {
+  return `/api/turns/${turnId}/events?history_only=true&event_types=${encodeEventTypes(TURN_DETAIL_EVENT_TYPES)}`;
+}
+
+function sortSessionsByUpdatedAt(items) {
+  return [...items].sort((left, right) => new Date(right.updated_at || 0) - new Date(left.updated_at || 0));
+}
+
+function upsertSessionSummary(sessions, summary) {
+  if (!summary?.session_id) {
+    return sessions;
+  }
+  const index = sessions.findIndex((item) => item.session_id === summary.session_id);
+  if (index === -1) {
+    return sortSessionsByUpdatedAt([...sessions, summary]);
+  }
+  const next = [...sessions];
+  next[index] = { ...next[index], ...summary };
+  return sortSessionsByUpdatedAt(next);
+}
+
+function mergeTurnSnapshot(turns, snapshot) {
+  const turn = normalizeTurn(snapshot);
+  if (!turn.turn_id) {
+    return turns;
+  }
+  const index = turns.findIndex((item) => item.turn_id === turn.turn_id);
+  if (index === -1) {
+    return normalizeTurns([...turns, turn]);
+  }
+  const next = [...turns];
+  next[index] = normalizeTurn({ ...next[index], ...turn });
+  return normalizeTurns(next);
+}
+
+function sessionPatchFromPayload(payload) {
+  const patch = payload?.data?.session || payload?.session || null;
+  return patch && typeof patch === "object" ? patch : null;
+}
+
+function turnPatchFromPayload(payload) {
+  const patch = payload?.data?.turn || payload?.turn || null;
+  return patch && typeof patch === "object" ? patch : null;
 }
 
 function createDeferred(sessionId) {
@@ -319,6 +357,7 @@ export function useWorkspaceController(appSettings) {
   const [resolvingApprovalIds, setResolvingApprovalIds] = useState(() => new Set());
   const [permissionOverrides, setPermissionOverrides] = useState(() => emptyOverrides());
   const [requestPending, setRequestPending] = useState(false);
+  const [inspectorDemanded, setInspectorDemanded] = useState(false);
   const eventSourceRef = useRef(null);
   const currentSessionIdRef = useRef(null);
   const eventCursorRef = useRef(null);
@@ -332,12 +371,11 @@ export function useWorkspaceController(appSettings) {
   const activeTurn = useMemo(() => selectActiveTurn(turns, session?.active_turn_id), [session?.active_turn_id, turns]);
   const currentTurn = useMemo(() => selectCurrentTurn(turns, focusedTurnId, session?.active_turn_id), [focusedTurnId, session?.active_turn_id, turns]);
   const currentTurnEvents = useMemo(() => currentTurn?.turn_id ? turnDetailsById[currentTurn.turn_id]?.events || [] : [], [currentTurn?.turn_id, turnDetailsById]);
-  const events = useMemo(() => combineLoadedEvents(sessionEvents, turnDetailsById), [sessionEvents, turnDetailsById]);
   const running = requestPending || Boolean(activeTurn && !TERMINAL_TURN_STATUSES.has(activeTurn.status));
-  const primaryTimeline = useMemo(() => buildPrimaryTimeline(messages, events, turns, {
+  const primaryTimeline = useMemo(() => buildPrimaryTimeline(messages, sessionEvents, turns, {
     showKeySystemCards: appSettings.chatPreferences.showKeySystemCards,
     activeTurnId: activeTurn?.turn_id || null,
-  }), [activeTurn?.turn_id, appSettings.chatPreferences.showKeySystemCards, events, messages, turns]);
+  }), [activeTurn?.turn_id, appSettings.chatPreferences.showKeySystemCards, messages, sessionEvents, turns]);
   const activityEvents = useMemo(() => filterActivityEvents(buildInspectorActivityEvents(currentTurnEvents, turns, messages, currentTurn?.turn_id)), [currentTurn?.turn_id, currentTurnEvents, turns, messages]);
   const filteredSessions = useMemo(() => {
     const keyword = sessionSearch.trim().toLowerCase();
@@ -345,8 +383,8 @@ export function useWorkspaceController(appSettings) {
   }, [sessionSearch, sessions]);
   const sessionGroups = useMemo(() => groupSessionsByDate(filteredSessions), [filteredSessions]);
   const evidenceState = useMemo(() => ({ items: evidenceItems, openIds: openEvidenceIds }), [evidenceItems, openEvidenceIds]);
-  const resolvedApprovalIds = useMemo(() => new Set(events.filter((event) => ["approval_resolved", "approval_expired"].includes(event.type)).map((event) => event.data?.approval_id).filter(Boolean)), [events]);
-  const supersededApprovals = useMemo(() => Object.fromEntries(events.filter((event) => event.type === "approval_superseded" && event.data?.old_approval_id).map((event) => [event.data.old_approval_id, { newApprovalId: event.data?.new_approval_id, reason: event.data?.reason }])), [events]);
+  const resolvedApprovalIds = useMemo(() => new Set(sessionEvents.filter((event) => ["approval_resolved", "approval_expired"].includes(event.type)).map((event) => event.data?.approval_id).filter(Boolean)), [sessionEvents]);
+  const supersededApprovals = useMemo(() => Object.fromEntries(sessionEvents.filter((event) => event.type === "approval_superseded" && event.data?.old_approval_id).map((event) => [event.data.old_approval_id, { newApprovalId: event.data?.new_approval_id, reason: event.data?.reason }])), [sessionEvents]);
   const supersededApprovalIds = useMemo(() => new Set(Object.keys(supersededApprovals)), [supersededApprovals]);
   const planGraph = useMemo(() => {
     if (planGraphOverride?.turn_id === currentTurn?.turn_id) {
@@ -423,20 +461,16 @@ export function useWorkspaceController(appSettings) {
   }
 
   hydrateExecutorRef.current = async (sessionId, request) => {
-    const [sessionResponse, messagesResponse, eventsResponse] = await Promise.all([
-      fetch(`/api/sessions/${sessionId}`, { signal: request.signal }),
-      fetch(`/api/sessions/${sessionId}/messages`, { signal: request.signal }),
-      fetch(sessionHistoryUrl(sessionId), { signal: request.signal }),
-    ]);
-    ensureOk(sessionResponse, "会话加载失败");
-    ensureOk(messagesResponse, "消息加载失败");
-    ensureOk(eventsResponse, "事件历史加载失败");
-    const [sessionPayload, messagePayload, rawEvents] = await Promise.all([sessionResponse.json(), messagesResponse.json(), eventsResponse.text()]);
+    const workspacePayload = await readJson(await fetch(`/api/sessions/${sessionId}/workspace`, { signal: request.signal }));
     if (!request.isCurrent() || sessionIntentRef.current !== sessionId) {
       return null;
     }
+    const sessionPayload = workspacePayload.session || null;
+    const messagePayload = Array.isArray(workspacePayload.messages) ? workspacePayload.messages : [];
+    if (!sessionPayload?.session_id) {
+      throw new Error("会话加载失败");
+    }
     const normalizedTurns = normalizeTurns(sessionPayload.turns || []);
-    const parsedEvents = parseEventHistory(rawEvents);
     eventCursorRef.current = null;
     currentSessionIdRef.current = sessionPayload.session_id;
     setSession(sessionPayload);
@@ -444,7 +478,7 @@ export function useWorkspaceController(appSettings) {
     setFocusedTurnId((current) => current && normalizedTurns.some((item) => item.turn_id === current) ? current : sessionPayload.active_turn_id || normalizedTurns[0]?.turn_id || null);
     setPermissionOverrides(normalizePermissionOverrides(sessionPayload.permission_overrides));
     setMessages(sortMessages(messagePayload));
-    setSessionEvents(parsedEvents);
+    setSessionEvents([]);
     setTurnDetailsById({});
     setExpandedItems(new Set());
     setOpenEvidenceIds(new Set());
@@ -456,7 +490,7 @@ export function useWorkspaceController(appSettings) {
     if (!request.isCurrent() || sessionIntentRef.current !== sessionId) {
       return null;
     }
-    return { events: parsedEvents, session: sessionPayload };
+    return { events: [], session: sessionPayload };
   };
 
   if (!hydrateControllerRef.current) {
@@ -509,7 +543,7 @@ export function useWorkspaceController(appSettings) {
       return undefined;
     }
     eventSourceRef.current?.close();
-    const source = new EventSource(`/api/sessions/${session.session_id}/events`);
+    const source = new EventSource(sessionLiveUrl(session.session_id));
     const tailGate = createTailEventGate();
     source.onopen = () => {
       tailGate.reset(null);
@@ -525,6 +559,20 @@ export function useWorkspaceController(appSettings) {
       } else if (payload.type === "session_title_updated") {
         setSession((current) => applySessionTitleUpdate(current, payload));
         setSessions((current) => applySessionSummaryTitleUpdate(current, payload));
+      } else if (payload.type === "session_updated") {
+        const patch = sessionPatchFromPayload(payload);
+        if (patch) {
+          setSession((current) => current?.session_id === patch.session_id ? { ...current, ...patch } : current);
+          setSessions((current) => upsertSessionSummary(current, patch));
+        }
+      } else if (payload.type === "turn_updated") {
+        const patch = turnPatchFromPayload(payload);
+        if (patch) {
+          setTurns((current) => mergeTurnSnapshot(current, patch));
+          if (patch.report_id) {
+            void loadReport(patch.report_id);
+          }
+        }
       }
       if (PRIMARY_TIMELINE_EVENT_TYPES.includes(payload.type)) {
         setSessionEvents((current) => mergeUniqueEvents(current, payload));
@@ -557,9 +605,10 @@ export function useWorkspaceController(appSettings) {
           });
         }
       }
-      if (payload.type === "session_permissions_updated") setPermissionOverrides(normalizePermissionOverrides(payload.data));
+      if (payload.type === "session_permissions_updated") {
+        setPermissionOverrides(normalizePermissionOverrides(payload.data));
+      }
       if (payload.data?.report_id) await loadReport(payload.data.report_id);
-      if (shouldRefreshSession(payload)) await hydrateSession(payload.session_id || session.session_id);
     };
     eventSourceRef.current = source;
     return () => {
@@ -579,7 +628,7 @@ export function useWorkspaceController(appSettings) {
       return cached;
     }
     const [eventsResponse, graphResponse] = await Promise.all([
-      fetch(`/api/turns/${turnId}/events?history_only=true`, { signal }),
+      fetch(turnDetailHistoryUrl(turnId), { signal }),
       fetch(`/api/turns/${turnId}/graph`, { signal }),
     ]);
     ensureOk(eventsResponse, "执行历史加载失败");
@@ -606,7 +655,7 @@ export function useWorkspaceController(appSettings) {
   }
 
   useEffect(() => {
-    if (!session?.session_id || !currentTurn?.turn_id) {
+    if (!inspectorDemanded || !session?.session_id || !currentTurn?.turn_id) {
       return undefined;
     }
     const controller = new AbortController();
@@ -616,7 +665,7 @@ export function useWorkspaceController(appSettings) {
       }
     });
     return () => controller.abort();
-  }, [currentTurn?.turn_id, session?.session_id]);
+  }, [currentTurn?.turn_id, inspectorDemanded, session?.session_id]);
 
   async function ensureSession(message) {
     if (session?.session_id) {
@@ -660,9 +709,17 @@ export function useWorkspaceController(appSettings) {
           mentions,
         }),
       }));
-      if (payload.session) setSession(payload.session);
-      await hydrateSession(sessionId);
-      if (!payload.turn) setRequestPending(false);
+      if (payload.session) {
+        setSession((current) => current?.session_id === payload.session.session_id ? { ...current, ...payload.session } : payload.session);
+        setSessions((current) => upsertSessionSummary(current, payload.session));
+      }
+      if (payload.turn) {
+        setTurns((current) => mergeTurnSnapshot(current, payload.turn));
+        setFocusedTurnId(payload.turn.turn_id);
+        if (payload.turn.report_id) {
+          void loadReport(payload.turn.report_id);
+        }
+      }
     } catch (error) {
       if (isAbortError(error)) {
         return;
@@ -680,7 +737,6 @@ export function useWorkspaceController(appSettings) {
     setResolvingApprovalIds((current) => new Set(current).add(approvalId));
     try {
       await readJson(await fetch(`/api/approvals/${approvalId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ approved, resolver: "webui" }) }));
-      if (session?.session_id) await hydrateSession(session.session_id);
     } catch (error) {
       if (isAbortError(error)) {
         return;
@@ -734,8 +790,8 @@ export function useWorkspaceController(appSettings) {
 
   async function cancelCurrentTurn() {
     if (!activeTurn || !session?.session_id) return;
-    await readJson(await fetch(`/api/turns/${activeTurn.turn_id}/cancel`, { method: "POST" }));
-    await hydrateSession(session.session_id);
+    const payload = await readJson(await fetch(`/api/turns/${activeTurn.turn_id}/cancel`, { method: "POST" }));
+    setTurns((current) => mergeTurnSnapshot(current, payload));
   }
 
   async function toggleEvidence(evidenceId) {
@@ -795,6 +851,7 @@ export function useWorkspaceController(appSettings) {
     running,
     runtimeDraft,
     savePermissionOverrides,
+    setInspectorDemanded,
     selectTurn: setFocusedTurnId,
     selectedGraphNode,
     selectedNodeId,

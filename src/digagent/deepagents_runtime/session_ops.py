@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from digagent.config import current_env_summary, load_profiles
@@ -8,7 +7,7 @@ from digagent.deepagents_runtime.capability_catalog import build_capability_cata
 from digagent.deepagents_runtime.factory import build_runtime
 from digagent.deepagents_runtime.memory import memory_source_paths
 from digagent.deepagents_runtime.state import SessionRuntimeHandle
-from digagent.deepagents_runtime.turns import POLL_INTERVAL_SEC, TERMINAL_TURN_STATUSES, load_session_events, load_turn_events
+from digagent.deepagents_runtime.turns import TERMINAL_TURN_STATUSES, load_session_events, load_turn_events
 from digagent.models import ApprovalStatus, MessageRecord, Scope, SessionPermissionOverrides, SessionRecord, TurnEvent, TurnRecord, TurnStatus
 
 
@@ -41,6 +40,23 @@ class TurnManagerSessionMixin:
     def list_turns(self, session_id: str) -> list[TurnRecord]:
         return self.storage.list_turns(session_id)
 
+    def serialize_session_summary(self, session: SessionRecord) -> dict[str, Any]:
+        payload = session.model_dump(mode="json")
+        payload["last_message_preview"] = payload.get("last_message_preview")
+        payload["pending_approval_count"] = len(session.pending_approval_ids)
+        return payload
+
+    def serialize_turn(self, turn: TurnRecord, *, include_graph: bool = True) -> dict[str, Any]:
+        exclude = None if include_graph else {"task_graph"}
+        payload = turn.model_dump(mode="json", exclude=exclude)
+        payload["pending_approvals"] = self.pending_approvals_for_turn(turn.turn_id)
+        return payload
+
+    def serialize_session(self, session: SessionRecord) -> dict[str, Any]:
+        payload = self.serialize_session_summary(session)
+        payload["turns"] = [self.serialize_turn(turn, include_graph=False) for turn in self.list_turns(session.session_id)]
+        return payload
+
     def get_turn(self, turn_id: str) -> TurnRecord:
         return self.storage.find_turn(turn_id)
 
@@ -67,39 +83,33 @@ class TurnManagerSessionMixin:
         return [self._serialize_pending_approval(item) for item in approvals]
 
     async def stream_events(self, session_id: str, *, since_index: int | None = None, event_types: set[str] | None = None):
-        index = self.session_event_count(session_id) if since_index is None else since_index
-        while True:
+        if since_index is not None:
             events = self.load_session_event_history(session_id, event_types=event_types)
-            while index < len(events):
-                yield events[index]
-                index += 1
-            await asyncio.sleep(POLL_INTERVAL_SEC)
+            for event in events[since_index:]:
+                yield event
+        async for event in self._stream_live_session_events(session_id, event_types=event_types):
+            yield event
 
-    async def stream_turn_events(self, turn_id: str, *, since_index: int | None = None):
-        turn = self.storage.find_turn(turn_id)
-        index = self.turn_event_count(turn.turn_id) if since_index is None else since_index
-        while True:
-            events = self.load_turn_event_history(turn.turn_id)
-            while index < len(events):
-                yield events[index]
-                index += 1
-            if index >= len(events) and self.turn_stream_stopped(turn.turn_id):
-                return
-            await asyncio.sleep(POLL_INTERVAL_SEC)
-            turn = self.storage.find_turn(turn_id)
+    async def stream_turn_events(self, turn_id: str, *, since_index: int | None = None, event_types: set[str] | None = None):
+        if since_index is not None:
+            events = self.load_turn_event_history(turn_id, event_types=event_types)
+            for event in events[since_index:]:
+                yield event
+        async for event in self._stream_live_turn_events(turn_id, event_types=event_types):
+            yield event
 
     def load_session_event_history(self, session_id: str, *, event_types: set[str] | None = None) -> list[TurnEvent]:
         return self._filter_events(load_session_events(self.storage, session_id), event_types)
 
-    def load_turn_event_history(self, turn_id: str) -> list[TurnEvent]:
+    def load_turn_event_history(self, turn_id: str, *, event_types: set[str] | None = None) -> list[TurnEvent]:
         turn = self.storage.find_turn(turn_id)
-        return load_turn_events(self.storage, turn.session_id, turn.turn_id)
+        return self._filter_events(load_turn_events(self.storage, turn.session_id, turn.turn_id), event_types)
 
     def session_event_count(self, session_id: str, *, event_types: set[str] | None = None) -> int:
         return len(self.load_session_event_history(session_id, event_types=event_types))
 
-    def turn_event_count(self, turn_id: str) -> int:
-        return len(self.load_turn_event_history(turn_id))
+    def turn_event_count(self, turn_id: str, *, event_types: set[str] | None = None) -> int:
+        return len(self.load_turn_event_history(turn_id, event_types=event_types))
 
     def turn_stream_stopped(self, turn_id: str) -> bool:
         return self.storage.find_turn(turn_id).status in {TurnStatus.AWAITING_APPROVAL, TurnStatus.AWAITING_USER_INPUT} or self._is_turn_terminal(turn_id)

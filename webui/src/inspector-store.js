@@ -1,4 +1,5 @@
 import { compactText } from "./chat-utils.js";
+import { compareRawEvents } from "./conversation-item-utils.js";
 import { turnGoal, turnResultSummary } from "./turn-utils.js";
 
 const NODE_STATUS_BY_TURN_STATUS = {
@@ -259,7 +260,7 @@ export function buildInspectorActivityEvents(events = [], turns = [], messages =
   const derivedEvents = focusTurnId
     ? buildDerivedActivityEvents(turns.filter((item) => item.turn_id === focusTurnId), messages)
     : buildDerivedActivityEvents(turns, messages);
-  return [...scopedEvents, ...derivedEvents].sort((left, right) => new Date(right.created_at || 0) - new Date(left.created_at || 0));
+  return [...scopedEvents, ...derivedEvents].sort((left, right) => compareRawEvents(right, left));
 }
 
 export function buildTurnInspectorStats(turn, messages = [], activityEvents = [], graph = null) {

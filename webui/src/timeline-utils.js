@@ -1,5 +1,6 @@
 import { compactText } from "./chat-utils.js";
 import { buildConversationItems, KEY_SYSTEM_CONVERSATION_ITEM_TYPES, PRIMARY_CONVERSATION_ITEM_TYPES } from "./conversation-items.js";
+import { compareRawEvents } from "./conversation-item-utils.js";
 import { statusLabel } from "./ui-copy.js";
 
 export const KEY_CHAT_EVENT_TYPES = KEY_SYSTEM_CONVERSATION_ITEM_TYPES;
@@ -81,7 +82,7 @@ export function filterPrimaryTimeline(timeline, showKeySystemCards = true) {
 export function filterActivityEvents(events) {
   return events
     .filter((item) => SYSTEM_ACTIVITY_TYPES.has(item.type))
-    .sort((left, right) => new Date(right.created_at || 0) - new Date(left.created_at || 0));
+    .sort((left, right) => compareRawEvents(right, left));
 }
 
 export function eventSummary(item) {

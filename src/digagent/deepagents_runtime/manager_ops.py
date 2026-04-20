@@ -37,6 +37,39 @@ PARTICIPANT_CONTEXT_FIELDS = (
 
 
 class TurnManagerOpsMixin(TurnManagerSessionMixin):
+    def _session_live_payload(self, session: SessionRecord) -> dict[str, Any]:
+        return {
+            "session_id": session.session_id,
+            "title": session.title,
+            "title_status": session.title_status,
+            "title_source": session.title_source,
+            "status": session.status,
+            "updated_at": session.updated_at,
+            "active_turn_id": session.active_turn_id,
+            "pending_approval_count": len(session.pending_approval_ids),
+            "last_message_preview": session.last_message_preview,
+            "latest_report_id": session.latest_report_id,
+        }
+
+    def _turn_live_payload(self, turn: TurnRecord) -> dict[str, Any]:
+        payload = turn.model_dump(mode="json", exclude={"task_graph"})
+        payload["pending_approvals"] = self.pending_approvals_for_turn(turn.turn_id)
+        return payload
+
+    def _emit_session_updated(self, session_id: str) -> None:
+        session = self.storage.load_session(session_id)
+        context = self._participant_context(
+            speaker_profile=session.speaker_profile,
+            addressed_participants=session.addressed_participants,
+            participant_profile=session.participant_profile,
+            handoff_from=session.handoff_from,
+            handoff_to=session.handoff_to,
+        )
+        self._broadcast_live_event(session.session_id, None, "session_updated", {"session": self._session_live_payload(session)}, **context)
+
+    def _emit_turn_updated(self, turn: TurnRecord) -> None:
+        self._broadcast_live_event(turn.session_id, turn.turn_id, "turn_updated", {"turn": self._turn_live_payload(turn)}, **self._turn_context(turn))
+
     def _participant_context(
         self,
         *,
@@ -112,6 +145,7 @@ class TurnManagerOpsMixin(TurnManagerSessionMixin):
         )
         self.storage.append_message(message)
         self._sync_session_context(session_id, **context)
+        self._emit_session_updated(session_id)
         return message
 
     def _emit(self, session_id: str, turn_id: str | None, event_type: str, data: dict[str, Any], **kwargs: Any) -> TurnEvent:
@@ -126,6 +160,21 @@ class TurnManagerOpsMixin(TurnManagerSessionMixin):
             created_at=utc_now(),
         )
         self.storage.append_turn_event(session_id, event)
+        self._publish_live_event(event)
+        return event
+
+    def _broadcast_live_event(self, session_id: str, turn_id: str | None, event_type: str, data: dict[str, Any], **kwargs: Any) -> TurnEvent:
+        context = self._participant_context(**kwargs)
+        event = TurnEvent(
+            event_id=new_id("evt"),
+            session_id=session_id,
+            turn_id=turn_id,
+            type=event_type,
+            data=self._event_payload(data, context),
+            **context,
+            created_at=utc_now(),
+        )
+        self._publish_live_event(event)
         return event
 
     def _update_session_metadata(
@@ -238,6 +287,8 @@ class TurnManagerOpsMixin(TurnManagerSessionMixin):
         session.active_turn_id = turn.turn_id
         session.pending_approval_ids = []
         self.storage.save_session(session)
+        self._emit_turn_updated(turn)
+        self._emit_session_updated(session.session_id)
         return session, turn
 
     def _emit_participant_handoff(self, session: SessionRecord, turn: TurnRecord, *, handoff_from: str, handoff_to: str) -> TurnRecord:
@@ -291,6 +342,8 @@ class TurnManagerOpsMixin(TurnManagerSessionMixin):
         turn.finished_at = utc_now()
         self.storage.save_turn(turn)
         session = self._release_session_turn(session.session_id, turn.turn_id, SessionStatus.IDLE)
+        self._emit_turn_updated(self.storage.load_turn(turn.session_id, turn.turn_id))
+        self._emit_session_updated(session.session_id)
         self._emit(session.session_id, turn.turn_id, "completed", {"message": assistant_text}, **context)
         return session
 
@@ -337,6 +390,8 @@ class TurnManagerOpsMixin(TurnManagerSessionMixin):
         session.active_turn_id = turn.turn_id
         session.pending_approval_ids = approval_ids
         self.storage.save_session(session)
+        self._emit_turn_updated(turn)
+        self._emit_session_updated(session.session_id)
         self._emit(
             session.session_id,
             turn.turn_id,
@@ -355,6 +410,8 @@ class TurnManagerOpsMixin(TurnManagerSessionMixin):
         turn.finished_at = utc_now()
         self.storage.save_turn(turn)
         session = self._release_session_turn(session.session_id, turn.turn_id, SessionStatus.IDLE)
+        self._emit_turn_updated(self.storage.load_turn(turn.session_id, turn.turn_id))
+        self._emit_session_updated(session.session_id)
         self._emit(session.session_id, turn.turn_id, "failed", {"error": turn.error_message}, **context)
         return session
 
@@ -383,7 +440,9 @@ class TurnManagerOpsMixin(TurnManagerSessionMixin):
         turn.error_message = reason or turn.error_message
         turn.finished_at = utc_now()
         self.storage.save_turn(turn)
-        self._release_session_turn(turn.session_id, turn.turn_id, SessionStatus.IDLE)
+        session = self._release_session_turn(turn.session_id, turn.turn_id, SessionStatus.IDLE)
+        self._emit_turn_updated(self.storage.load_turn(turn.session_id, turn.turn_id))
+        self._emit_session_updated(session.session_id)
         self._emit(turn.session_id, turn.turn_id, event_type, {"reason": reason}, **context)
         return turn
 
@@ -412,7 +471,9 @@ class TurnManagerOpsMixin(TurnManagerSessionMixin):
         turn.error_message = f"Superseded by turn {new_turn_id}."
         turn.finished_at = utc_now()
         self.storage.save_turn(turn)
-        self._release_session_turn(turn.session_id, turn.turn_id, SessionStatus.IDLE)
+        session = self._release_session_turn(turn.session_id, turn.turn_id, SessionStatus.IDLE)
+        self._emit_turn_updated(self.storage.load_turn(turn.session_id, turn.turn_id))
+        self._emit_session_updated(session.session_id)
         self._emit(
             turn.session_id,
             turn.turn_id,

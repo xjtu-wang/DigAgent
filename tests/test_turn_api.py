@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from digagent.models import RuntimeBudget, Scope, TaskGraph, TaskNode, TaskNodeKind, TaskNodeStatus, TurnEvent
+from digagent.models import MessageRole, RuntimeBudget, Scope, TaskGraph, TaskNode, TaskNodeKind, TaskNodeStatus, TurnEvent
 from tests.runtime_turn_fakes import FakeAgent, fake_runtime_factory
 from tests.turn_test_utils import parse_sse_events
 
@@ -173,6 +173,43 @@ async def test_session_snapshot_omits_turn_task_graph(test_settings, runtime_mod
 
 
 @pytest.mark.asyncio
+async def test_session_workspace_returns_session_and_messages_without_turn_task_graph(test_settings, runtime_modules) -> None:
+    turn_manager, create_app = runtime_modules
+    manager = turn_manager(test_settings)
+    app = create_app(manager)
+    session = manager.create_session("workspace", "sisyphus-default", Scope())
+    turn = manager.storage.create_turn(
+        session_id=session.session_id,
+        profile_name="sisyphus-default",
+        task="show workspace",
+        scope=Scope(),
+        budget=RuntimeBudget(),
+    )
+    turn.task_graph = TaskGraph(
+        turn_id=turn.turn_id,
+        nodes=[
+            TaskNode(
+                node_id="node-1",
+                title="Inspect",
+                kind=TaskNodeKind.TOOL,
+                status=TaskNodeStatus.RUNNING,
+                description="inspect repo",
+            )
+        ],
+    )
+    manager.storage.save_turn(turn)
+    manager._append_message(session.session_id, turn.turn_id, "hello workspace", role=MessageRole.USER)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get(f"/api/sessions/{session.session_id}/workspace")
+        response.raise_for_status()
+
+    payload = response.json()
+    assert payload["session"]["session_id"] == session.session_id
+    assert "task_graph" not in payload["session"]["turns"][0]
+    assert isinstance(payload["messages"], list)
+
+
+@pytest.mark.asyncio
 async def test_session_event_history_supports_type_filter(test_settings, runtime_modules) -> None:
     turn_manager, create_app = runtime_modules
     manager = turn_manager(test_settings)
@@ -212,6 +249,50 @@ async def test_session_event_history_supports_type_filter(test_settings, runtime
             f"/api/sessions/{session.session_id}/events?history_only=true&event_types=approval_required",
         )
         response.raise_for_status()
+    assert [item["type"] for item in parse_sse_events(response.text)] == ["approval_required"]
+
+
+@pytest.mark.asyncio
+async def test_turn_event_history_supports_type_filter(test_settings, runtime_modules) -> None:
+    turn_manager, create_app = runtime_modules
+    manager = turn_manager(test_settings)
+    app = create_app(manager)
+    session = manager.create_session("turn-history-filter", "sisyphus-default", Scope())
+    turn = manager.storage.create_turn(
+        session_id=session.session_id,
+        profile_name="sisyphus-default",
+        task="filter turn events",
+        scope=Scope(),
+        budget=RuntimeBudget(),
+    )
+    manager.storage.append_turn_event(
+        session.session_id,
+        TurnEvent(
+            event_id="evt-turn-approval",
+            session_id=session.session_id,
+            turn_id=turn.turn_id,
+            type="approval_required",
+            data={"approval_id": "apr-1"},
+            created_at="2026-04-19T01:00:00Z",
+        ),
+    )
+    manager.storage.append_turn_event(
+        session.session_id,
+        TurnEvent(
+            event_id="evt-turn-completed",
+            session_id=session.session_id,
+            turn_id=turn.turn_id,
+            type="completed",
+            data={"turn_id": turn.turn_id},
+            created_at="2026-04-19T01:00:01Z",
+        ),
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get(
+            f"/api/turns/{turn.turn_id}/events?history_only=true&event_types=approval_required",
+        )
+        response.raise_for_status()
+
     assert [item["type"] for item in parse_sse_events(response.text)] == ["approval_required"]
 
 
