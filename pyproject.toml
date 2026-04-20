@@ -11,8 +11,9 @@ requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "Codex" }]
 dependencies = [
-  "deepagents>=0.4.12",
+  "deepagents>=0.5.3",
   "langchain>=1.2.15",
+  "langchain-mcp-adapters>=0.2.2",
   "langgraph>=1.1.6",
   "langgraph-checkpoint-sqlite>=3.0.3",
   "langchain-openai>=1.0.0",

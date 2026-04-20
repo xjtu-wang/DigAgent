@@ -37,7 +37,7 @@ class AppSettings(BaseSettings):
     @model_validator(mode="after")
     def _resolve_default_paths(self) -> "AppSettings":
         if self.mcp_servers_dir is None:
-            self.mcp_servers_dir = self.config_dir / "mcp" / "servers"
+            self.mcp_servers_dir = self.workspace_root / ".agents" / "mcp"
         return self
 
     @property
@@ -64,13 +64,12 @@ def _settings_env_values(settings: AppSettings) -> dict[str, str]:
 def load_profiles(settings: AppSettings | None = None) -> dict[str, AgentProfile]:
     settings = settings or get_settings()
     profiles: dict[str, AgentProfile] = {}
-    agent_dir = settings.config_dir / "agents"
+    agent_dir = settings.workspace_root / ".agents" / "subagents"
     env_values = _settings_env_values(settings)
-    for path in sorted(agent_dir.glob("*.yaml")):
+    for path in sorted(agent_dir.glob("*/agent.yaml")):
         raw_text = expand_env_text(path.read_text(encoding="utf-8"), env_values)
         payload = yaml.safe_load(raw_text) or {}
-        prompt_ref = payload.pop("system_prompt_file")
-        payload["system_prompt"] = load_prompt_text(prompt_ref, settings=settings)
+        payload["system_prompt"] = load_prompt_text(path.parent, settings=settings)
         profile = AgentProfile.model_validate(payload)
         profiles[profile.name] = profile
     return profiles

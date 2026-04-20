@@ -1,33 +1,35 @@
 name: ctf_orchestrator_inventory
-description: Inspect the bundled CTF sandbox orchestrator plugin assets and return a JSON inventory.
+description: Inspect the bundled CTF orchestrator skill assets and return a structured inventory.
 version: 1
-entry: plugin_command
+function: run
 args_schema:
   type: object
-  properties:
-    argv:
-      type: array
-      items:
-        type: string
+  properties: {}
 output_schema:
   type: object
   properties:
-    command_name:
+    name:
       type: string
-    plugin_id:
+    root:
       type: string
-    exit_code:
+    skill_count:
       type: integer
-    output:
-      type: string
-risk_tags:
-  - shell_exec
-timeout_sec: 60
+    bundled_skills:
+      type: array
+      items:
+        type: string
+    references:
+      type: array
+      items:
+        type: string
+    agent_configs:
+      type: array
+      items:
+        type: string
+risk_tags: []
+timeout_sec: 15
 env_policy: inherit
 working_dir: .
-interrupt_on_call: true
+interrupt_on_call: false
 memory_hooks: {}
 report_hooks: {}
-metadata:
-  plugin_id: ctf-sandbox-orchestrator
-  command_name: ctf_orchestrator_inventory

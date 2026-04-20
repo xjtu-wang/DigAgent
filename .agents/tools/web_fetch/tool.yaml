@@ -1,7 +1,7 @@
 name: web_fetch
 description: Fetch a target URL with GET or HEAD and return normalized evidence fields.
 version: 1
-entry: web_fetch
+function: run
 args_schema:
   type: object
   properties:
@@ -34,4 +34,3 @@ working_dir: .
 interrupt_on_call: false
 memory_hooks: {}
 report_hooks: {}
-metadata: {}

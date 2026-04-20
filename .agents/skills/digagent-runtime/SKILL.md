@@ -7,8 +7,10 @@ description: DigAgent runtime conventions for .agents-based skills, tools, and m
 
 ## Layout
 
+- Root and specialist agent profiles live under `/.agents/subagents/*/agent.yaml`.
 - Project skills live under `/.agents/skills/`.
-- Project tools are declared under `/.agents/tools/*/tool.yaml`.
+- Project tools live under `/.agents/tools/*/{tool.yaml,script.py}`.
+- MCP server configs live under `/.agents/mcp/*.yaml`.
 - Long-term memory lives under `/.agents/memory/*.md`.
 
 ## Memory
@@ -27,4 +29,4 @@ description: DigAgent runtime conventions for .agents-based skills, tools, and m
 ## MCP
 
 - Prefer MCP only when built-in deepagents filesystem/shell tools and project tools are not enough.
-- Start by listing servers and tools before making an MCP call.
+- Prefer enabling only the specific MCP servers needed by the active agent profile.

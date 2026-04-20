@@ -1,32 +1,85 @@
 from __future__ import annotations
 
+import importlib.util
+import inspect
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import urlparse
 
 import yaml
-from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.tools import StructuredTool
+from pydantic import Field, create_model
 
 from digagent.config import AppSettings, get_settings
 from digagent.cve import CveKnowledgeBase
 from digagent.models import ToolManifest
-from digagent.plugins import PluginCatalog
+from digagent.report.exporter import ReportExporter
 from digagent.storage import FileStorage
 from digagent.toolsets.network import NetworkToolset
 
 from ._paths import to_backend_path
-from .mcp import McpRuntime, create_mcp_runtime
+from .tool_policy import RuntimeToolBinding
 
 
 @dataclass(frozen=True)
 class ProjectToolContext:
     settings: AppSettings
-    plugins: PluginCatalog
     knowledge_base: CveKnowledgeBase
     storage: FileStorage
     network: NetworkToolset
-    mcp: McpRuntime
+    report_exporter: ReportExporter
+    allowed_domains: tuple[str, ...] = ()
+
+    def ensure_url_allowed(self, url: str) -> None:
+        if not self.allowed_domains:
+            return
+        host = (urlparse(url).hostname or "").lower()
+        if not host or not any(host == domain or host.endswith(f".{domain}") for domain in self.allowed_domains):
+            raise PermissionError(f"URL host is outside network scope: {url}")
+
+    def ensure_search_query_allowed(self, query: str) -> None:
+        if not self.allowed_domains:
+            return
+        lowered = query.lower()
+        if any(f"site:{domain}" in lowered for domain in self.allowed_domains):
+            return
+        allowed = ", ".join(self.allowed_domains)
+        raise PermissionError(f"web_search is restricted to: {allowed}; include an allowed site: filter explicitly.")
+
+    def command_cwd(self, manifest: ToolManifest) -> str:
+        if not manifest.working_dir:
+            return str(self.settings.workspace_root)
+        raw_path = Path(manifest.working_dir)
+        path = raw_path if raw_path.is_absolute() else self.settings.workspace_root / raw_path
+        return str(path.resolve())
+
+    def command_env(self, manifest: ToolManifest) -> dict[str, str]:
+        if manifest.env_policy == "empty":
+            return {}
+        return dict(os.environ)
+
+    def run_shell(self, manifest: ToolManifest, command: str, timeout: int | None = None) -> dict[str, Any]:
+        effective_timeout = timeout or manifest.timeout_sec or self.settings.shell_timeout_sec
+        completed = subprocess.run(
+            command,
+            shell=True,
+            text=True,
+            capture_output=True,
+            timeout=effective_timeout,
+            cwd=self.command_cwd(manifest),
+            env=self.command_env(manifest),
+        )
+        output = (completed.stdout or "") + ("\n[stderr]\n" + completed.stderr if completed.stderr else "")
+        limit = self.settings.shell_output_limit
+        return {
+            "command": command,
+            "exit_code": completed.returncode,
+            "output": output[:limit],
+            "truncated": len(output) > limit,
+        }
 
 
 def project_tools_root(settings: AppSettings | None = None) -> Path:
@@ -43,11 +96,7 @@ def load_project_tool_manifests(settings: AppSettings | None = None) -> list[Too
     for path in sorted(root.glob("*/tool.yaml")):
         payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         manifest = ToolManifest.model_validate(payload)
-        manifests.append(
-            manifest.model_copy(
-                update={"path": to_backend_path(path.parent, resolved) or str(path.parent)},
-            )
-        )
+        manifests.append(manifest.model_copy(update={"path": to_backend_path(path.parent, resolved) or str(path.parent)}))
     return manifests
 
 
@@ -58,197 +107,122 @@ def project_tool_catalog(settings: AppSettings | None = None) -> list[dict[str, 
 def build_project_tools(
     settings: AppSettings | None = None,
     *,
-    mcp_runtime: McpRuntime | None = None,
-) -> list[BaseTool]:
+    allowed_domains: tuple[str, ...] = (),
+) -> list[RuntimeToolBinding]:
     resolved = settings or get_settings()
     context = ProjectToolContext(
         settings=resolved,
-        plugins=PluginCatalog(resolved),
         knowledge_base=CveKnowledgeBase(resolved),
         storage=FileStorage(resolved),
         network=NetworkToolset(resolved),
-        mcp=mcp_runtime or create_mcp_runtime(resolved),
+        report_exporter=ReportExporter(resolved),
+        allowed_domains=tuple(domain.lower() for domain in allowed_domains if domain),
     )
     return [_build_project_tool(manifest, context) for manifest in load_project_tool_manifests(resolved)]
 
 
-def _build_project_tool(manifest: ToolManifest, context: ProjectToolContext) -> BaseTool:
-    if manifest.entry == "plugin_command":
-        return _plugin_command_tool(manifest, context)
-    if manifest.entry == "report_export":
-        return _report_export_tool(manifest, context)
-    if manifest.entry == "vuln_kb_lookup":
-        return _vuln_lookup_tool(manifest, context)
-    if manifest.entry == "web_search":
-        return _web_search_tool(manifest, context)
-    if manifest.entry == "web_fetch":
-        return _web_fetch_tool(manifest, context)
-    if manifest.entry == "mcp_list_servers":
-        return _mcp_list_servers_tool(manifest, context)
-    if manifest.entry == "mcp_list_tools":
-        return _mcp_list_tools_tool(manifest, context)
-    if manifest.entry == "mcp_list_resources":
-        return _mcp_list_resources_tool(manifest, context)
-    if manifest.entry == "mcp_read_resource":
-        return _mcp_read_resource_tool(manifest, context)
-    if manifest.entry == "mcp_call_tool":
-        return _mcp_call_tool(manifest, context)
-    raise ValueError(f"Unsupported project tool entry '{manifest.entry}' for {manifest.name}")
+def _build_project_tool(manifest: ToolManifest, context: ProjectToolContext) -> RuntimeToolBinding:
+    tool_dir = _tool_dir(manifest, context.settings)
+    tool_function = _load_tool_function(tool_dir / "script.py", manifest.function)
+    args_schema = _build_args_schema(manifest)
+    if inspect.iscoroutinefunction(tool_function):
+        async def _arun(**kwargs: Any) -> Any:
+            return await _invoke_tool(tool_function, manifest, context, kwargs)
 
-
-def _plugin_command_tool(manifest: ToolManifest, context: ProjectToolContext) -> BaseTool:
-    plugin_id = str(manifest.metadata.get("plugin_id") or "").strip()
-    command_name = str(manifest.metadata.get("command_name") or manifest.name).strip()
-    plugin = context.plugins.load(plugin_id)
-    command = next((item for item in plugin.commands if item.name == command_name), None)
-    if command is None or command.script_path is None:
-        raise KeyError(f"Unknown plugin command mapping for {manifest.name}")
-
-    def run(argv: list[str] | None = None) -> dict[str, Any]:
-        completed = subprocess.run(
-            [command.script_path, *(argv or [])],
-            text=True,
-            capture_output=True,
-            timeout=manifest.timeout_sec or context.settings.shell_timeout_sec,
-            cwd=_resolve_working_dir(manifest, context.settings),
-            env=_environment(manifest),
+        tool = StructuredTool.from_function(
+            coroutine=_arun,
+            name=manifest.name,
+            description=manifest.description,
+            args_schema=args_schema,
         )
-        output = (completed.stdout or "") + ("\n[stderr]\n" + completed.stderr if completed.stderr else "")
-        return {
-            "command_name": command.name,
-            "plugin_id": plugin.plugin_id,
-            "exit_code": completed.returncode,
-            "output": output[: context.settings.shell_output_limit],
-        }
+    else:
+        def _run(**kwargs: Any) -> Any:
+            return _invoke_sync_tool(tool_function, manifest, context, kwargs)
 
-    return StructuredTool.from_function(func=run, name=manifest.name, description=manifest.description)
-
-
-def _report_export_tool(manifest: ToolManifest, context: ProjectToolContext) -> BaseTool:
-    def export(report_id: str, format: str = "markdown", include_content: bool = False) -> dict[str, Any]:
-        report = context.storage.load_report(report_id)
-        if format == "markdown":
-            path = context.storage.report_markdown_path(report_id)
-            payload = {
-                "report_id": report_id,
-                "format": format,
-                "path": str(path),
-                "title": report.title,
-                "kind": report.kind,
-            }
-            if include_content:
-                payload["content"] = path.read_text(encoding="utf-8")
-            return payload
-        if format == "pdf":
-            path = context.storage.report_pdf_path(report_id)
-            return {
-                "report_id": report_id,
-                "format": format,
-                "path": str(path),
-                "title": report.title,
-                "kind": report.kind,
-            }
-        raise ValueError("Unsupported format")
-
-    return StructuredTool.from_function(func=export, name=manifest.name, description=manifest.description)
-
-
-def _vuln_lookup_tool(manifest: ToolManifest, context: ProjectToolContext) -> BaseTool:
-    def lookup(
-        query: str = "",
-        cve_id: str = "",
-        cwe: str = "",
-        product: str = "",
-        limit: int = 10,
-    ) -> list[dict[str, Any]]:
-        matches = context.knowledge_base.search(
-            query=query,
-            cve_id=cve_id or None,
-            cwe=cwe or None,
-            product=product or None,
-            limit=limit,
+        tool = StructuredTool.from_function(
+            func=_run,
+            name=manifest.name,
+            description=manifest.description,
+            args_schema=args_schema,
         )
-        return [item.model_dump(mode="json") for item in matches]
-
-    return StructuredTool.from_function(func=lookup, name=manifest.name, description=manifest.description)
-
-
-def _web_search_tool(manifest: ToolManifest, context: ProjectToolContext) -> BaseTool:
-    async def run(query: str, limit: int = 5) -> dict[str, Any]:
-        title, summary, raw, facts, source, _, _ = await context.network.web_search({"query": query, "limit": limit})
-        return _network_payload(title, summary, raw, facts, source)
-
-    return StructuredTool.from_function(coroutine=run, name=manifest.name, description=manifest.description)
+    return RuntimeToolBinding(
+        tool=tool,
+        risk_tags=tuple(manifest.risk_tags),
+        interrupt_on_call=manifest.interrupt_on_call,
+    )
 
 
-def _web_fetch_tool(manifest: ToolManifest, context: ProjectToolContext) -> BaseTool:
-    async def run(url: str, method: str = "GET") -> dict[str, Any]:
-        title, summary, raw, facts, source, _, _ = await context.network.web_fetch({"url": url, "method": method})
-        return _network_payload(title, summary, raw, facts, source)
-
-    return StructuredTool.from_function(coroutine=run, name=manifest.name, description=manifest.description)
-
-
-def _mcp_list_servers_tool(manifest: ToolManifest, context: ProjectToolContext) -> BaseTool:
-    def run() -> list[str]:
-        return context.mcp.list_servers()
-
-    return StructuredTool.from_function(func=run, name=manifest.name, description=manifest.description)
+def _load_tool_function(script_path: Path, symbol: str):
+    spec = importlib.util.spec_from_file_location(f"digagent_project_tool_{script_path.parent.name}", script_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load tool module: {script_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    try:
+        return getattr(module, symbol)
+    except AttributeError as exc:
+        raise AttributeError(f"Tool function '{symbol}' not found in {script_path}") from exc
 
 
-def _mcp_list_tools_tool(manifest: ToolManifest, context: ProjectToolContext) -> BaseTool:
-    def run(server_name: str) -> list[dict[str, Any]]:
-        return context.mcp.list_tools(server_name)
-
-    return StructuredTool.from_function(func=run, name=manifest.name, description=manifest.description)
-
-
-def _mcp_list_resources_tool(manifest: ToolManifest, context: ProjectToolContext) -> BaseTool:
-    def run(server_name: str) -> dict[str, Any]:
-        return context.mcp.list_resources(server_name)
-
-    return StructuredTool.from_function(func=run, name=manifest.name, description=manifest.description)
+def _tool_dir(manifest: ToolManifest, settings: AppSettings) -> Path:
+    if manifest.path and manifest.path.startswith("/"):
+        return settings.workspace_root / manifest.path.lstrip("/")
+    return project_tools_root(settings) / manifest.name
 
 
-def _mcp_read_resource_tool(manifest: ToolManifest, context: ProjectToolContext) -> BaseTool:
-    def run(server_name: str, uri: str) -> dict[str, Any]:
-        return context.mcp.read_resource(server_name, uri)
-
-    return StructuredTool.from_function(func=run, name=manifest.name, description=manifest.description)
+async def _invoke_tool(tool_function, manifest: ToolManifest, context: ProjectToolContext, kwargs: dict[str, Any]) -> Any:
+    call_kwargs = _call_kwargs(tool_function, manifest, context, kwargs)
+    return await tool_function(**call_kwargs)
 
 
-def _mcp_call_tool(manifest: ToolManifest, context: ProjectToolContext) -> BaseTool:
-    def run(server_name: str, tool_name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
-        return context.mcp.call_tool(server_name, tool_name, arguments or {})
-
-    return StructuredTool.from_function(func=run, name=manifest.name, description=manifest.description)
-
-
-def _network_payload(
-    title: str,
-    summary: str,
-    raw_output: str,
-    facts: list[dict[str, Any]],
-    source: dict[str, Any],
-) -> dict[str, Any]:
-    return {
-        "title": title,
-        "summary": summary,
-        "raw_output": raw_output,
-        "facts": facts,
-        "source": source,
-    }
+def _invoke_sync_tool(tool_function, manifest: ToolManifest, context: ProjectToolContext, kwargs: dict[str, Any]) -> Any:
+    call_kwargs = _call_kwargs(tool_function, manifest, context, kwargs)
+    result = tool_function(**call_kwargs)
+    if inspect.isawaitable(result):
+        raise TypeError(f"Tool '{manifest.name}' returned an awaitable from a sync entrypoint.")
+    return result
 
 
-def _resolve_working_dir(manifest: ToolManifest, settings: AppSettings) -> str | None:
-    if not manifest.working_dir:
-        return None
-    candidate = Path(manifest.working_dir)
-    path = candidate if candidate.is_absolute() else settings.workspace_root / candidate
-    return str(path.resolve())
+def _call_kwargs(tool_function, manifest: ToolManifest, context: ProjectToolContext, kwargs: dict[str, Any]) -> dict[str, Any]:
+    call_kwargs = dict(kwargs)
+    parameters = inspect.signature(tool_function).parameters
+    if "tool_context" in parameters:
+        call_kwargs["tool_context"] = context
+    if "manifest" in parameters:
+        call_kwargs["manifest"] = manifest
+    return call_kwargs
 
 
-def _environment(manifest: ToolManifest) -> dict[str, str] | None:
-    if manifest.env_policy == "empty":
-        return {}
-    return None
+def _build_args_schema(manifest: ToolManifest):
+    schema = manifest.args_schema or {"type": "object", "properties": {}}
+    properties = dict(schema.get("properties") or {})
+    required = set(schema.get("required") or [])
+    fields: dict[str, tuple[Any, Any]] = {}
+    for field_name, field_schema in properties.items():
+        annotation = _annotation_for_schema(field_schema)
+        default = ... if field_name in required else field_schema.get("default", None)
+        if default is None and field_name not in required:
+            annotation = annotation | None
+        fields[field_name] = (annotation, Field(default=default, description=field_schema.get("description")))
+    return create_model(f"{manifest.name.title().replace('_', '')}Args", **fields)
+
+
+def _annotation_for_schema(schema: dict[str, Any]) -> Any:
+    values = schema.get("enum")
+    if isinstance(values, list) and values:
+        return Literal.__getitem__(tuple(values))
+    schema_type = schema.get("type")
+    if schema_type == "string":
+        return str
+    if schema_type == "integer":
+        return int
+    if schema_type == "number":
+        return float
+    if schema_type == "boolean":
+        return bool
+    if schema_type == "array":
+        item_schema = schema.get("items") if isinstance(schema.get("items"), dict) else {}
+        return list[_annotation_for_schema(item_schema)]
+    if schema_type == "object":
+        return dict[str, Any]
+    return Any

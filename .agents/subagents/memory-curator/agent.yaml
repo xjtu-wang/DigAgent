@@ -1,0 +1,13 @@
+name: memory-curator
+description: Curator for layered long-term memory, daily notes, and wiki updates.
+provider: openai-compatible
+model: ${MODEL}
+subagents: []
+tool_allowlist: []
+mcp_server_allowlist: []
+network_scope: []
+filesystem_scope: []
+runtime_budget:
+  max_parallel_subagents: 0
+  max_tool_calls: 1000
+  max_runtime_seconds: 3600

@@ -12,7 +12,6 @@ from digagent.deepagents_runtime.skills import skill_source_paths
 from digagent.deepagents_runtime.state import SessionRuntimeHandle
 from digagent.deepagents_runtime.turns import POLL_INTERVAL_SEC, TERMINAL_TURN_STATUSES, load_session_events, load_turn_events
 from digagent.models import ApprovalStatus, MessageRecord, Scope, SessionPermissionOverrides, SessionRecord, TurnEvent, TurnRecord, TurnStatus
-from digagent.plugins import PluginCatalog
 
 
 class TurnManagerSessionMixin:
@@ -28,7 +27,6 @@ class TurnManagerSessionMixin:
             "tools": project_tool_catalog(self.settings),
             "skills": skill_source_paths(self.settings),
             "memory": memory_source_paths(self.settings),
-            "plugins": PluginCatalog(self.settings).catalog(),
             "mcp_servers": list_mcp_server_names(self.settings),
             "cve": self.cve_status(),
         }
@@ -151,7 +149,7 @@ class TurnManagerSessionMixin:
         if session.active_turn_id:
             raise RuntimeError("Cannot delete a session with an active turn.")
         handle = self._runtimes.pop(session_id, None)
-        if handle is not None and hasattr(handle.runtime, "mcp_runtime"):
+        if handle is not None and getattr(handle.runtime, "mcp_runtime", None) is not None:
             handle.runtime.mcp_runtime.close()
         self.storage.delete_session(session_id)
         return session_id

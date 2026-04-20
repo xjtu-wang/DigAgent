@@ -9,12 +9,8 @@ from digagent.runtime import TurnManager
 
 EXPECTED_PROJECT_TOOLS = {
     "ctf_orchestrator_inventory",
-    "mcp_call_tool",
-    "mcp_list_resources",
-    "mcp_list_servers",
-    "mcp_list_tools",
-    "mcp_read_resource",
     "report_export",
+    "shell_exec",
     "vuln_kb_lookup",
     "web_fetch",
     "web_search",
@@ -33,22 +29,22 @@ def test_project_tool_manifests_load_from_agents_directory(test_settings) -> Non
     assert all(item.path and item.path.startswith("/.agents/tools/") for item in manifests)
     report_export = next(item for item in manifests if item.name == "report_export")
     assert report_export.interrupt_on_call is True
-    assert report_export.entry == "report_export"
+    assert report_export.function == "run"
 
 
 def test_build_custom_tools_includes_manifest_backed_project_tools(test_settings) -> None:
     tools = build_custom_tools(test_settings)
     names = {item.name for item in tools}
     assert EXPECTED_PROJECT_TOOLS <= names
-    assert "run_plugin_command" not in names
+    assert "mcp_call_tool" not in names
 
 
 def test_interrupt_config_uses_manifest_defaults(test_settings) -> None:
     config = interrupt_on_config(None, auto_approve=False, settings=test_settings)
     assert config is not None
-    assert config["ctf_orchestrator_inventory"] is True
-    assert config["mcp_call_tool"] is True
+    assert config["edit_file"] is True
     assert config["report_export"] is True
+    assert config["shell_exec"] is True
     assert "vuln_kb_lookup" not in config
 
 
@@ -58,4 +54,4 @@ def test_turn_manager_catalog_exposes_agents_tools(test_settings) -> None:
     assert catalog["skills"] == ["/.agents/skills"]
     assert catalog["memory"] == ["/.agents/memory/project.md"]
     assert {item["name"] for item in catalog["tools"]} == EXPECTED_PROJECT_TOOLS
-    assert any(item["plugin_id"] == "ctf-sandbox-orchestrator" for item in catalog["plugins"])
+    assert set(catalog["mcp_servers"]) == {"fixture-mcp", "kali-local", "playwright-local"}

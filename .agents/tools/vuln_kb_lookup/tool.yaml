@@ -1,7 +1,7 @@
 name: vuln_kb_lookup
 description: Search the local CVE knowledge base by keyword, CVE ID, CWE, or product.
 version: 1
-entry: vuln_kb_lookup
+function: run
 args_schema:
   type: object
   properties:
@@ -26,4 +26,3 @@ working_dir: .
 interrupt_on_call: false
 memory_hooks: {}
 report_hooks: {}
-metadata: {}

@@ -1,7 +1,7 @@
 name: report_export
 description: Export an existing DigAgent report as markdown or pdf and return the artifact path.
 version: 1
-entry: report_export
+function: run
 args_schema:
   type: object
   properties:
@@ -37,4 +37,3 @@ interrupt_on_call: true
 memory_hooks: {}
 report_hooks:
   kind: export
-metadata: {}

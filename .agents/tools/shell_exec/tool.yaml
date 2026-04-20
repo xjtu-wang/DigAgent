@@ -1,0 +1,31 @@
+name: shell_exec
+description: Execute a shell command in the current workspace and return combined stdout and stderr.
+version: 1
+function: run
+args_schema:
+  type: object
+  properties:
+    command:
+      type: string
+    timeout:
+      type: integer
+  required: [command]
+output_schema:
+  type: object
+  properties:
+    command:
+      type: string
+    exit_code:
+      type: integer
+    output:
+      type: string
+    truncated:
+      type: boolean
+risk_tags:
+  - shell_exec
+timeout_sec: 60
+env_policy: inherit
+working_dir: .
+interrupt_on_call: true
+memory_hooks: {}
+report_hooks: {}

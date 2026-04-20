@@ -54,7 +54,6 @@ class FileStorage:
             "reports",
             "artifacts/blob",
             "skills",
-            "plugins",
             "tools",
             "mcp",
             "agents",

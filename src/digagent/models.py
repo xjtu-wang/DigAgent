@@ -744,6 +744,7 @@ class AgentProfile(DigAgentModel):
     provider: str = "openai-compatible"
     model: str | None = None
     system_prompt: str
+    subagents: list[str] = Field(default_factory=list)
     tool_allowlist: list[str] = Field(default_factory=list)
     mcp_server_allowlist: list[str] = Field(default_factory=list)
     network_scope: list[str] = Field(default_factory=list)
@@ -756,7 +757,7 @@ class ToolManifest(DigAgentModel):
     description: str
     path: str | None = None
     version: int | None = None
-    entry: str
+    function: str
     args_schema: dict[str, Any] = Field(default_factory=dict)
     output_schema: dict[str, Any] = Field(default_factory=dict)
     risk_tags: list[str] = Field(default_factory=list)
@@ -766,31 +767,6 @@ class ToolManifest(DigAgentModel):
     interrupt_on_call: bool = False
     memory_hooks: dict[str, Any] = Field(default_factory=dict)
     report_hooks: dict[str, Any] = Field(default_factory=dict)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class PluginCommandManifest(DigAgentModel):
-    plugin_id: str
-    name: str
-    description: str
-    action_type: ActionType = ActionType.TOOL
-    risk_tags: list[str] = Field(default_factory=list)
-    default_targets: ActionTargets = Field(default_factory=ActionTargets)
-    executor_adapter: str
-    script_path: str | None = None
-    arguments_schema: dict[str, Any] = Field(default_factory=dict)
-
-
-class PluginManifest(DigAgentModel):
-    plugin_id: str
-    name: str
-    description: str
-    path: str
-    version: str | None = None
-    bundled_skills: list[str] = Field(default_factory=list)
-    commands: list[PluginCommandManifest] = Field(default_factory=list)
-    references: list[str] = Field(default_factory=list)
-    agent_config_path: str | None = None
 
 
 class SkillManifest(DigAgentModel):

@@ -18,7 +18,6 @@ def build_live_settings(tmp_path: Path, repo_root: Path) -> tuple[AppSettings, s
     workspace_root.mkdir(parents=True, exist_ok=True)
     shutil.copytree(repo_root / ".agents", workspace_root / ".agents", dirs_exist_ok=True)
     shutil.copytree(repo_root / "config", workspace_root / "config", dirs_exist_ok=True)
-    shutil.copytree(repo_root / "data" / "plugins", workspace_root / "data" / "plugins", dirs_exist_ok=True)
     token = f"probe-{uuid.uuid4().hex}"
     (workspace_root / "probe.txt").write_text(token, encoding="utf-8")
     settings = AppSettings(

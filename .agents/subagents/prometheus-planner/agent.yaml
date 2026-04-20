@@ -1,0 +1,29 @@
+name: prometheus-planner
+description: Planning-focused agent for ambiguous tasks.
+provider: openai-compatible
+model: ${MODEL}
+subagents: []
+tool_allowlist:
+  - write_todos
+  - ls
+  - read_file
+  - glob
+  - grep
+  - web_search
+  - web_fetch
+  - vuln_kb_lookup
+  - playwright-local_browser_navigate
+  - playwright-local_browser_snapshot
+  - playwright-local_browser_click
+  - kali-local_nmap_scan
+  - kali-local_metasploit_run
+  - kali-local_binwalk_analyze
+mcp_server_allowlist:
+  - playwright-local
+  - kali-local
+network_scope: []
+filesystem_scope: []
+runtime_budget:
+  max_parallel_subagents: 1
+  max_tool_calls: 1000
+  max_runtime_seconds: 3600

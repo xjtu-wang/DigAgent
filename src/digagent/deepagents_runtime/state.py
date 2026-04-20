@@ -29,7 +29,7 @@ class SessionRuntimeHandle:
     active_task: asyncio.Task[Any] | None = None
 
     async def aclose(self) -> None:
-        if hasattr(self.runtime, "mcp_runtime"):
+        if getattr(self.runtime, "mcp_runtime", None) is not None:
             self.runtime.mcp_runtime.close()
         if self.checkpoint_context is not None:
             if hasattr(self.checkpoint_context, "__aexit__"):

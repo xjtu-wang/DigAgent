@@ -1,7 +1,7 @@
 name: web_search
 description: Search the web using the configured provider and return normalized candidate URLs.
 version: 1
-entry: web_search
+function: run
 args_schema:
   type: object
   properties:
@@ -33,4 +33,3 @@ working_dir: .
 interrupt_on_call: false
 memory_hooks: {}
 report_hooks: {}
-metadata: {}
