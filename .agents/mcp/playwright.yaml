@@ -1,0 +1,18 @@
+server_id: playwright
+name: Playwright MCP
+description: Microsoft Playwright MCP server，用于浏览器导航、页面交互与快照采集。
+enabled: true
+transport:
+  type: stdio
+  command: npx
+  args:
+    - -y
+    - "@playwright/mcp@latest"
+    - --isolated
+    - --browser
+    - chromium
+    - --block-service-workers
+related_skills:
+  - digagent-runtime
+default_risk_tags:
+  - network

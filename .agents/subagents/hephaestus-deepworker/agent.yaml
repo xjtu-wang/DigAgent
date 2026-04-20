@@ -1,5 +1,5 @@
 name: hephaestus-deepworker
-description: Focused worker for repo and web evidence analysis.
+description: Unified security execution worker. Use this agent for repo inspection, web behavior analysis, browser interaction, CTF-style execution, and external reconnaissance such as Shodan.
 provider: openai-compatible
 model: ${MODEL}
 subagents: []
@@ -18,15 +18,11 @@ tool_allowlist:
   - cve_fetch_online
   - cve_sync_sources
   - vuln_kb_lookup
-  - playwright-local_browser_navigate
-  - playwright-local_browser_snapshot
-  - playwright-local_browser_click
-  - kali-local_nmap_scan
-  - kali-local_metasploit_run
-  - kali-local_binwalk_analyze
+  - task
 mcp_server_allowlist:
-  - playwright-local
-  - kali-local
+  - github
+  - playwright
+  - shodan
 network_scope: []
 filesystem_scope: []
 runtime_budget:

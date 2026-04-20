@@ -5,7 +5,6 @@ model: ${MODEL}
 subagents:
   - prometheus-planner
   - hephaestus-deepworker
-  - hackey-ctf
   - report-writer
   - memory-curator
 tool_allowlist:
@@ -26,15 +25,7 @@ tool_allowlist:
   - report_export
   - vuln_kb_lookup
   - ctf_orchestrator_inventory
-  - playwright-local_browser_navigate
-  - playwright-local_browser_snapshot
-  - playwright-local_browser_click
-  - kali-local_nmap_scan
-  - kali-local_metasploit_run
-  - kali-local_binwalk_analyze
-mcp_server_allowlist:
-  - playwright-local
-  - kali-local
+mcp_server_allowlist: []
 network_scope: []
 filesystem_scope: []
 runtime_budget:

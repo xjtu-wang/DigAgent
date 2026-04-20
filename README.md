@@ -29,3 +29,7 @@ Copy `.env.example` to `.env` and provide:
 
 For offline tests, set `DIGAGENT_USE_FAKE_MODEL=1`.
 
+Optional integrations:
+
+- `GITHUB_PERSONAL_ACCESS_TOKEN` for the GitHub MCP server
+- `SHODAN_API_KEY` for the Shodan MCP server

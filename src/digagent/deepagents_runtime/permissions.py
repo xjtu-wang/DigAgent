@@ -8,7 +8,7 @@ from .project_tools import load_project_tool_manifests
 from .tool_policy import RuntimeToolBinding
 
 ALWAYS_CONFIRM_CORE_TOOLS = frozenset({"edit_file", "write_file"})
-DEFAULT_CONFIRM_RISK_TAGS = frozenset({"shell_exec", "external_exploit"})
+DEFAULT_CONFIRM_RISK_TAGS = frozenset({"shell_exec", "external_exploit", "open_world_recon"})
 FILESYSTEM_OPERATIONS = ["read", "write"]
 
 
@@ -17,14 +17,23 @@ def allowed_tool_names(
     bindings: list[RuntimeToolBinding],
     overrides: SessionPermissionOverrides | None,
 ) -> frozenset[str]:
-    allowed = set(profile.tool_allowlist)
-    risk_map = {binding.name: binding.risk_tags for binding in bindings}
-    filtered = {
-        name
-        for name in allowed
-        if not tool_denied(name, risk_map.get(name, ()), overrides)
-    }
-    return frozenset(filtered)
+    allowed: set[str] = set()
+    bound_names: set[str] = set()
+    for binding in bindings:
+        bound_names.add(binding.name)
+        if binding.server_name is not None:
+            if binding.server_name not in profile.mcp_server_allowlist:
+                continue
+        elif binding.name not in profile.tool_allowlist:
+            continue
+        if tool_denied(binding.name, binding.risk_tags, overrides):
+            continue
+        allowed.add(binding.name)
+    for name in profile.tool_allowlist:
+        if name in bound_names or tool_denied(name, (), overrides):
+            continue
+        allowed.add(name)
+    return frozenset(allowed)
 
 
 def filesystem_permissions(profile: AgentProfile) -> list[Any]:

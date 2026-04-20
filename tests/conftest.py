@@ -21,6 +21,8 @@ def test_settings(tmp_path: Path, repo_root: Path):
         OPENAI_API_KEY="test-key",
         BASE_URL="https://example.invalid/v1",
         MODEL="fake-model",
+        GITHUB_PERSONAL_ACCESS_TOKEN=None,
+        SHODAN_API_KEY=None,
         DIGAGENT_USE_FAKE_MODEL=False,
         workspace_root=repo_root,
         data_dir=data_dir,

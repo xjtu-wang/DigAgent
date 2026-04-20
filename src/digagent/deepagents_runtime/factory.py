@@ -13,6 +13,7 @@ from digagent.config import AppSettings, get_settings, resolve_profile
 from digagent.models import SessionPermissionOverrides
 
 from .memory import memory_source_paths
+from .mcp_prompt import append_mcp_prompt_context
 from .permissions import filesystem_permissions, interrupt_on_config
 from .skills import skill_source_paths
 from .subagents import build_subagents
@@ -52,6 +53,12 @@ async def build_runtime(
     skill_sources = skill_source_paths(resolved)
     memory_sources = memory_source_paths(resolved, session_id=session_id)
     tool_bindings, allowed_names = await build_agent_tools(profile, settings=resolved, overrides=overrides)
+    system_prompt = append_mcp_prompt_context(
+        profile.system_prompt,
+        profile=profile,
+        bindings=tool_bindings,
+        settings=resolved,
+    )
     model = ChatOpenAI(
         model=profile.model or resolved.model,
         api_key=resolved.openai_api_key,
@@ -68,7 +75,7 @@ async def build_runtime(
     agent = create_deep_agent(
         model=model,
         tools=[binding.tool for binding in tool_bindings],
-        system_prompt=profile.system_prompt,
+        system_prompt=system_prompt,
         skills=skill_sources or None,
         memory=memory_sources or None,
         permissions=filesystem_permissions(profile),

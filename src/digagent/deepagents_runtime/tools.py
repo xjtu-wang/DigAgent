@@ -32,7 +32,6 @@ async def build_agent_tools(
     mcp_bindings = await build_mcp_tools(
         settings=resolved,
         server_allowlist=profile.mcp_server_allowlist,
-        tool_allowlist=candidate_names,
         overrides=overrides,
     )
     all_bindings = [*custom_bindings, *mcp_bindings]

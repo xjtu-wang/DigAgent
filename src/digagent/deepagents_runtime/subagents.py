@@ -6,6 +6,7 @@ from langchain_openai import ChatOpenAI
 from digagent.config import AppSettings, get_settings, load_profiles
 from digagent.models import SessionPermissionOverrides
 
+from .mcp_prompt import append_mcp_prompt_context
 from .permissions import filesystem_permissions, interrupt_on_config
 from .tool_policy import ToolAllowlistMiddleware
 from .tools import build_agent_tools
@@ -31,10 +32,16 @@ async def build_subagents(
     for name in root_profile.subagents:
         profile = profiles[name]
         bindings, allowed_names = await build_agent_tools(profile, settings=resolved, overrides=overrides)
+        system_prompt = append_mcp_prompt_context(
+            profile.system_prompt,
+            profile=profile,
+            bindings=bindings,
+            settings=resolved,
+        )
         spec: SubAgent = {
             "name": name,
             "description": profile.description,
-            "system_prompt": profile.system_prompt,
+            "system_prompt": system_prompt,
             "tools": [binding.tool for binding in bindings],
             "permissions": filesystem_permissions(profile),
             "middleware": [ToolAllowlistMiddleware(allowed=allowed_names)],

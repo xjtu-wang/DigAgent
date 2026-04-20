@@ -177,8 +177,8 @@ def _invoke_sync_tool(tool_function, manifest: ToolManifest, context: ProjectToo
 
 
 def _call_kwargs(tool_function, manifest: ToolManifest, context: ProjectToolContext, kwargs: dict[str, Any]) -> dict[str, Any]:
-    call_kwargs = dict(kwargs)
     parameters = inspect.signature(tool_function).parameters
+    call_kwargs = {key: value for key, value in kwargs.items() if key in parameters}
     if "tool_context" in parameters:
         call_kwargs["tool_context"] = context
     if "manifest" in parameters:

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from digagent.deepagents_runtime.memory import memory_source_paths
+from digagent.deepagents_runtime.mcp_prompt import append_mcp_prompt_context
 from digagent.deepagents_runtime.permissions import interrupt_on_config
 from digagent.deepagents_runtime.project_tools import load_project_tool_manifests
 from digagent.deepagents_runtime.skills import skill_source_paths
 from digagent.deepagents_runtime.tools import build_custom_tools
+from digagent.config import resolve_profile
+from digagent.deepagents_runtime.tool_policy import RuntimeToolBinding
 from digagent.runtime import TurnManager
 
 EXPECTED_PROJECT_TOOLS = {
@@ -60,4 +63,23 @@ def test_turn_manager_catalog_exposes_agents_tools(test_settings) -> None:
     assert any(item["name"] == "cve-intel" and item["path"] == "/.agents/skills/cve-intel" for item in catalog["skills"])
     assert any(item["name"] == "digagent-runtime" and item["path"] == "/.agents/skills/digagent-runtime" for item in catalog["skills"])
     assert any(item["name"] == "report-delivery" and item["path"] == "/.agents/skills/report-delivery" for item in catalog["skills"])
-    assert {item["server_id"] for item in catalog["mcp_servers"]} == {"fixture-mcp", "kali-local", "playwright-local"}
+    servers = {item["server_id"]: item for item in catalog["mcp_servers"]}
+    assert set(servers) == {"github", "playwright", "shodan"}
+    assert "missing_required_env:GITHUB_PERSONAL_ACCESS_TOKEN" in servers["github"]["issues"]
+    assert "missing_required_env:SHODAN_API_KEY" in servers["shodan"]["issues"]
+    assert not any(issue.startswith("missing_required_env") for issue in servers["playwright"]["issues"])
+
+
+def test_append_mcp_prompt_context_includes_availability_and_tools(test_settings) -> None:
+    profile = resolve_profile("hephaestus-deepworker", test_settings)
+    bindings = [
+        RuntimeToolBinding(tool=type("_Tool", (), {"name": "playwright_browser_navigate"})(), server_name="playwright"),
+        RuntimeToolBinding(tool=type("_Tool", (), {"name": "playwright_browser_snapshot"})(), server_name="playwright"),
+    ]
+
+    prompt = append_mcp_prompt_context("base prompt", profile=profile, bindings=bindings, settings=test_settings)
+
+    assert "MCP 附录：" in prompt
+    assert "github: unavailable; issues: missing_required_env:GITHUB_PERSONAL_ACCESS_TOKEN" in prompt
+    assert "playwright: " in prompt
+    assert "playwright_browser_navigate" in prompt

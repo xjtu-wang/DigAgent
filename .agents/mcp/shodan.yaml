@@ -1,0 +1,42 @@
+server_id: shodan
+name: Shodan MCP
+description: BurtTheCoder 的 Shodan MCP server，用于公网资产与漏洞相关情报查询。
+enabled: true
+transport:
+  type: stdio
+  command: npx
+  args:
+    - -y
+    - "@burtthecoder/mcp-shodan"
+  env:
+    SHODAN_API_KEY: ${SHODAN_API_KEY}
+related_skills:
+  - digagent-runtime
+required_env:
+  - SHODAN_API_KEY
+default_risk_tags:
+  - network
+  - open_world_recon
+tool_allowlist:
+  - ip_lookup
+  - shodan_search
+  - cve_lookup
+  - dns_lookup
+  - reverse_dns_lookup
+  - cpe_lookup
+  - cves_by_product
+advertised_tools:
+  - name: ip_lookup
+    description: 查询单个 IP 的 Shodan 情报。
+  - name: shodan_search
+    description: 通过查询语法搜索暴露资产。
+  - name: cve_lookup
+    description: 查询 CVE 相关的 Shodan 情报。
+  - name: dns_lookup
+    description: 查询域名解析相关情报。
+  - name: reverse_dns_lookup
+    description: 反向 DNS 查询。
+  - name: cpe_lookup
+    description: 根据 CPE 查询相关暴露面。
+  - name: cves_by_product
+    description: 根据产品枚举相关 CVE。

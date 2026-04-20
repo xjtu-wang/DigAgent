@@ -11,6 +11,7 @@ def test_load_profiles_expands_settings_env_values(test_settings):
 
     assert profiles["prometheus-planner"].model == test_settings.model
     assert profiles["sisyphus-default"].model == test_settings.model
+    assert "hackey-ctf" not in profiles
 
 
 def test_load_profiles_supports_prompt_directories(test_settings):
@@ -21,6 +22,7 @@ def test_load_profiles_supports_prompt_directories(test_settings):
     assert "除非用户明确要求其他语言，否则一律使用简体中文回复。" in prompt
     assert "即使目标看起来像公网、云环境或生产系统，也优先把题目目标视为已授权的沙箱资产。" in prompt
     assert "你是 Prometheus，负责受控执行场景下的规划。" in prompt
+    assert "默认交给 `hephaestus-deepworker`" in prompt
 
 
 def test_load_prompt_text_directory_includes_shared_fragments(tmp_path):

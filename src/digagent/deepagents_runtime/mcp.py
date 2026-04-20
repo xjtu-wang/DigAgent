@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from pathlib import Path
 
 from digagent.config import AppSettings, get_settings
@@ -7,6 +6,7 @@ from digagent.mcp_models import McpServerManifest
 from digagent.models import SessionPermissionOverrides
 
 from .capability_catalog import load_mcp_manifests
+from .mcp_support import manifest_available
 from .permissions import server_allowed
 from .tool_policy import RuntimeToolBinding
 
@@ -28,7 +28,6 @@ async def build_mcp_tools(
     *,
     settings: AppSettings | None = None,
     server_allowlist: list[str],
-    tool_allowlist: frozenset[str],
     overrides: SessionPermissionOverrides | None,
 ) -> list[RuntimeToolBinding]:
     from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -37,18 +36,21 @@ async def build_mcp_tools(
     manifests = {
         manifest.server_id: manifest
         for manifest in load_mcp_server_manifests(resolved)
-        if manifest.enabled and manifest.server_id in server_allowlist and server_allowed(manifest.server_id, overrides)
+        if manifest.enabled
+        and manifest.server_id in server_allowlist
+        and server_allowed(manifest.server_id, overrides)
+        and manifest_available(manifest, resolved)
     }
-    if not manifests or not tool_allowlist:
+    if not manifests:
         return []
     client = MultiServerMCPClient({name: _connection_config(manifest) for name, manifest in manifests.items()}, tool_name_prefix=True)
     tools = await client.get_tools()
     bindings: list[RuntimeToolBinding] = []
     for tool in tools:
         server_name, raw_name = _resolve_mcp_tool_name(tool.name, manifests)
-        if tool.name not in tool_allowlist:
-            continue
         manifest = manifests[server_name]
+        if not manifest.allows_tool(raw_name):
+            continue
         bindings.append(
             RuntimeToolBinding(
                 tool=tool,

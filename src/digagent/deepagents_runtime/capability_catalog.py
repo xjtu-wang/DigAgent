@@ -5,11 +5,13 @@ from typing import Any
 
 import yaml
 
-from digagent.config import AppSettings, get_settings
+from digagent.config import AppSettings, get_settings, settings_env_values
 from digagent.mcp_models import McpServerManifest
 from digagent.models import SkillManifest, ToolManifest
+from digagent.utils import expand_env_text
 
 from ._paths import to_backend_path
+from .mcp_support import manifest_available, manifest_issues
 
 SKILL_ROOT = Path(".agents/skills")
 TOOL_ROOT = Path(".agents/tools")
@@ -46,8 +48,10 @@ def load_mcp_manifests(settings: AppSettings | None = None) -> list[McpServerMan
     if not root.exists():
         return []
     manifests: list[McpServerManifest] = []
+    env_values = settings_env_values(resolved)
     for path in sorted(root.glob("*.yaml")):
-        payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        raw_text = expand_env_text(path.read_text(encoding="utf-8"), env_values)
+        payload = yaml.safe_load(raw_text) or {}
         manifests.append(McpServerManifest.model_validate(payload))
     return manifests
 
@@ -155,16 +159,19 @@ def _tool_entry(manifest: ToolManifest) -> dict[str, Any]:
 def _mcp_entry(manifest: McpServerManifest, settings: AppSettings) -> dict[str, Any]:
     root = settings.mcp_servers_dir or (settings.workspace_root / MCP_ROOT)
     source_path = to_backend_path(root / f"{manifest.server_id}.yaml", settings) or str(root / f"{manifest.server_id}.yaml")
+    issues = manifest_issues(manifest, settings)
     return {
         "server_id": manifest.server_id,
         "name": manifest.name,
         "description": manifest.description,
         "enabled": manifest.enabled,
+        "available": manifest_available(manifest, settings),
         "transport": manifest.transport.type,
         "origin": "project",
         "source_path": source_path,
         "default_risk_tags": list(manifest.default_risk_tags),
         "related_skills": list(manifest.related_skills),
+        "required_env": list(manifest.required_env),
         "declared_tools": [tool.model_dump(mode="json") for tool in manifest.visible_advertised_tools()],
-        "issues": [],
+        "issues": issues,
     }

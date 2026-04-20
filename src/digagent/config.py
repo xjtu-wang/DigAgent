@@ -20,6 +20,8 @@ class AppSettings(BaseSettings):
     base_url: str | None = Field(default=None, alias="BASE_URL")
     model: str | None = Field(default=None, alias="MODEL")
     nvd_api_key: str | None = Field(default=None, alias="NVD_API_KEY")
+    github_personal_access_token: str | None = Field(default=None, alias="GITHUB_PERSONAL_ACCESS_TOKEN")
+    shodan_api_key: str | None = Field(default=None, alias="SHODAN_API_KEY")
     digagent_use_fake_model: bool = Field(default=False, alias="DIGAGENT_USE_FAKE_MODEL")
     workspace_root: Path = Field(default_factory=lambda: Path.cwd())
     data_dir: Path = Field(default_factory=lambda: Path.cwd() / "data")
@@ -59,6 +61,10 @@ def _settings_env_values(settings: AppSettings) -> dict[str, str]:
     return values
 
 
+def settings_env_values(settings: AppSettings) -> dict[str, str]:
+    return _settings_env_values(settings)
+
+
 def load_profiles(settings: AppSettings | None = None) -> dict[str, AgentProfile]:
     settings = settings or get_settings()
     profiles: dict[str, AgentProfile] = {}
@@ -89,6 +95,8 @@ def current_env_summary(settings: AppSettings | None = None) -> dict[str, str | 
         "can_use_model": settings.can_use_model,
         "fake_model": settings.digagent_use_fake_model,
         "has_nvd_api_key": bool(settings.nvd_api_key),
+        "has_github_personal_access_token": bool(settings.github_personal_access_token),
+        "has_shodan_api_key": bool(settings.shodan_api_key),
         "workspace_root": str(settings.workspace_root),
         "approval_timeout_sec": settings.approval_timeout_sec,
     }
