@@ -9,7 +9,6 @@ import { normalizeTurn, normalizeTurnEvent, normalizeTurns, TERMINAL_TURN_STATUS
 
 const PRIMARY_TIMELINE_EVENT_TYPES = [
   "assistant_chunk",
-  "langgraph_tasks",
   "tool_result",
   "participant_handoff",
   "participant_message",
@@ -348,6 +347,7 @@ export function useWorkspaceController(appSettings) {
   const [planGraphOverride, setPlanGraphOverride] = useState(null);
   const [selectedNodeId, setSelectedNodeId] = useState(null);
   const [task, setTask] = useState("");
+  const [attachmentDrafts, setAttachmentDrafts] = useState([]);
   const [runtimeDraft, setRuntimeDraft] = useState(() => createRuntimeDraft(appSettings));
   const [expandedItems, setExpandedItems] = useState(new Set());
   const [evidenceItems, setEvidenceItems] = useState({});
@@ -454,6 +454,7 @@ export function useWorkspaceController(appSettings) {
     setTurnDetailsById({});
     setPlanGraphOverride(null);
     setSelectedNodeId(null);
+    setAttachmentDrafts([]);
     setExpandedItems(new Set());
     setOpenEvidenceIds(new Set());
     setOpenReportIds(new Set());
@@ -589,22 +590,6 @@ export function useWorkspaceController(appSettings) {
           };
         });
       }
-      if (payload.type === "task_graph_updated") {
-        const graphPayload = { ...payload.data, turn_id: payload.turn_id || payload.data?.turn_id || null };
-        setPlanGraphOverride(graphPayload);
-        if (graphPayload.turn_id) {
-          setTurnDetailsById((current) => {
-            const detail = current[graphPayload.turn_id] || { events: [], graph: null };
-            return {
-              ...current,
-              [graphPayload.turn_id]: {
-                ...detail,
-                graph: graphPayload,
-              },
-            };
-          });
-        }
-      }
       if (payload.type === "session_permissions_updated") {
         setPermissionOverrides(normalizePermissionOverrides(payload.data));
       }
@@ -676,9 +661,32 @@ export function useWorkspaceController(appSettings) {
     return payload.session_id;
   }
 
+  async function uploadAttachments(files) {
+    const items = Array.from(files || []);
+    if (!items.length) {
+      return [];
+    }
+    const sessionId = await ensureSession(task || "附件");
+    const uploaded = [];
+    for (const file of items) {
+      const body = new FormData();
+      body.append("file", file);
+      const response = await fetch(`/api/sessions/${sessionId}/attachments`, { method: "POST", body });
+      const artifact = await readJson(response);
+      uploaded.push(artifact);
+    }
+    setAttachmentDrafts((current) => [...current, ...uploaded]);
+    return uploaded;
+  }
+
+  function removeAttachmentDraft(artifactId) {
+    setAttachmentDrafts((current) => current.filter((item) => item.artifact_id !== artifactId));
+  }
+
   async function sendMessage(options = {}) {
     const message = typeof options.content === "string" ? options.content.trim() : task.trim();
     const mentions = Array.isArray(options.mentions) ? options.mentions.filter(Boolean) : [];
+    const artifactRefs = attachmentDrafts.map((item) => item.artifact_id).filter(Boolean);
     if (!message) return;
     try {
       setRequestPending(true);
@@ -694,7 +702,7 @@ export function useWorkspaceController(appSettings) {
         addressed_participants: mentions,
         content: message,
         evidence_refs: [],
-        artifact_refs: [],
+        artifact_refs: artifactRefs,
         created_at: new Date().toISOString(),
       }]));
       setTask("");
@@ -707,8 +715,10 @@ export function useWorkspaceController(appSettings) {
           scope: scopePayload(runtimeDraft.repoPath, runtimeDraft.domain),
           auto_approve: runtimeDraft.autoApprove,
           mentions,
+          artifact_refs: artifactRefs,
         }),
       }));
+      setAttachmentDrafts([]);
       if (payload.session) {
         setSession((current) => current?.session_id === payload.session.session_id ? { ...current, ...payload.session } : payload.session);
         setSessions((current) => upsertSessionSummary(current, payload.session));
@@ -825,11 +835,13 @@ export function useWorkspaceController(appSettings) {
   function startFreshSession() {
     resetSessionView();
     setTask("");
+    setAttachmentDrafts([]);
   }
 
   return {
     activityEvents,
     activeTurn,
+    attachmentDrafts,
     canArchiveCurrentSession,
     canDeleteCurrentSession,
     cancelCurrentTurn,
@@ -848,6 +860,7 @@ export function useWorkspaceController(appSettings) {
     resolveApproval,
     resolvedApprovalIds,
     resolvingApprovalIds,
+    removeAttachmentDraft,
     running,
     runtimeDraft,
     savePermissionOverrides,
@@ -874,5 +887,6 @@ export function useWorkspaceController(appSettings) {
     toggleReport,
     turns,
     hydrateSession,
+    uploadAttachments,
   };
 }

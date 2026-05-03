@@ -10,6 +10,7 @@ args_schema:
     method:
       type: string
       enum: [GET, HEAD]
+      default: GET
   required: [url]
 output_schema:
   type: object

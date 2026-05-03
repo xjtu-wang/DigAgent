@@ -36,6 +36,7 @@ from digagent.utils import ensure_parent, json_dumps, new_id, utc_now
 ModelT = TypeVar("ModelT", bound=BaseModel)
 logger = logging.getLogger(__name__)
 TAIL_READ_CHUNK_SIZE = 4096
+SESSION_ATTACHMENT_TURN_ID = "session"
 
 
 class FileStorage:
@@ -342,7 +343,7 @@ class FileStorage:
         approval_ids = set(session.pending_approval_ids)
         evidence_ids = set(session.evidence_refs)
         report_ids = set(session.report_refs)
-        artifact_ids: set[str] = set()
+        artifact_ids: set[str] = set(session.scope.artifacts)
 
         for turn in turns:
             approval_ids.update(turn.approval_ids)
@@ -543,6 +544,7 @@ class FileStorage:
         content: str | bytes,
         mime_type: str = "text/plain",
         suffix: str = ".txt",
+        filename: str | None = None,
     ) -> ArtifactRecord:
         artifact_id = new_id("art")
         blob_path = self.artifact_blob_path(turn_id, artifact_id, suffix)
@@ -555,6 +557,7 @@ class FileStorage:
             kind=kind,
             session_id=session_id,
             turn_id=turn_id,
+            filename=filename,
             storage_path=str(blob_path),
             mime_type=mime_type,
             size_bytes=len(raw),
@@ -562,6 +565,30 @@ class FileStorage:
             created_at=utc_now(),
         )
         self._write_json(self.artifact_json_path(artifact_id), artifact)
+        return artifact
+
+    def save_attachment(
+        self,
+        *,
+        session_id: str,
+        content: bytes,
+        filename: str,
+        mime_type: str,
+    ) -> ArtifactRecord:
+        suffix = Path(filename).suffix or ".bin"
+        artifact = self.save_artifact(
+            session_id=session_id,
+            turn_id=SESSION_ATTACHMENT_TURN_ID,
+            kind="attachment",
+            content=content,
+            mime_type=mime_type,
+            suffix=suffix,
+            filename=filename,
+        )
+        session = self.load_session(session_id)
+        if artifact.artifact_id not in session.scope.artifacts:
+            session.scope.artifacts.append(artifact.artifact_id)
+            self.save_session(session)
         return artifact
 
     def load_artifact(self, artifact_id: str) -> ArtifactRecord:

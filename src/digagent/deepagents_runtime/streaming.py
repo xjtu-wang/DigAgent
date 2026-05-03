@@ -96,9 +96,10 @@ def _apply_task_payload(
     event_data = {
         "node_id": node["node_id"],
         "title": node["title"],
+        "kind": node["kind"],
         "status": node["status"],
         "summary": node.get("summary") or node["description"],
-        "metadata": node["metadata"],
+        "metadata": _event_metadata(node["metadata"]),
     }
     events = [(event_type, event_data)]
     return next_graph, events, True
@@ -119,7 +120,7 @@ def _apply_update_payload(
     node = payload["nodes"][index]
     update_preview = _preview(data[first_name])
     metadata = dict(node.get("metadata") or {})
-    metadata["last_update"] = to_event_data(data[first_name])
+    metadata["last_update_preview"] = _preview(data[first_name])
     metadata["ns"] = list(ns)
     node["metadata"] = metadata
     if update_preview:
@@ -146,7 +147,7 @@ def _task_node_payload(nodes: list[dict[str, Any]], data: Any, ns: tuple[str, ..
     metadata["task_id"] = node_id
     status = _task_status(data)
     summary = _task_summary(data)
-    metadata["payload"] = to_event_data(data)
+    metadata["payload_preview"] = _preview(data)
     node = {
         "node_id": node_id,
         "title": name,
@@ -262,3 +263,8 @@ def _preview(value: Any) -> str:
     rendered = json.dumps(to_event_data(value), ensure_ascii=False, sort_keys=True)
     compact = " ".join(rendered.split())
     return compact[:MAX_PREVIEW_CHARS]
+
+
+def _event_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    public_keys = ("ns", "task_id", "payload_preview", "last_update_preview")
+    return {key: metadata[key] for key in public_keys if key in metadata}

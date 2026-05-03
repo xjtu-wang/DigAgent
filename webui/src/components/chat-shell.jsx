@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Archive, ArrowUp, Settings2, ShieldCheck, SquarePen, XCircle } from "lucide-react";
+import { Archive, ArrowUp, Paperclip, Settings2, ShieldCheck, SquarePen, X, XCircle } from "lucide-react";
 import { compactText } from "../chat-utils";
 import { collectComposerMentions, normalizeMentionAgents } from "../composer-utils";
 import { countOverrides } from "../permissions-store";
@@ -74,7 +74,7 @@ function WorkspaceHeader({ activeTurn, canArchiveCurrentSession, canDeleteCurren
   );
 }
 
-function ComposerPanel({ activeTurn, agents, onCancelTurn, onDownloadReport, onSendMessage, permissionOverrides, runtimeDraft, session, settings, setTask, task }) {
+function ComposerPanel({ activeTurn, agents, attachmentDrafts, onCancelTurn, onDownloadReport, onRemoveAttachment, onSendMessage, onUploadAttachments, permissionOverrides, runtimeDraft, session, settings, setTask, task }) {
   const mentionAgents = useMemo(() => normalizeMentionAgents(agents), [agents]);
   const chips = useMemo(
     () => composerRuntimeChips(runtimeDraft, permissionOverrides),
@@ -97,11 +97,28 @@ function ComposerPanel({ activeTurn, agents, onCancelTurn, onDownloadReport, onS
             setValue={setTask}
             value={task}
           />
+          {attachmentDrafts.length ? (
+            <div className="flex flex-wrap gap-2 px-4 pb-3">
+              {attachmentDrafts.map((item) => (
+                <Badge key={item.artifact_id} className="gap-1.5 bg-emerald-50 text-emerald-800">
+                  <Paperclip size={12} />
+                  <span className="max-w-[14rem] truncate">{item.filename || item.artifact_id}</span>
+                  <button type="button" className="rounded-full p-0.5 hover:bg-emerald-100" onClick={() => onRemoveAttachment(item.artifact_id)} aria-label="移除附件">
+                    <X size={12} />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center justify-between gap-3 px-4 pb-4">
             <div className="flex min-w-0 flex-wrap gap-2">
               {chips.map((chip) => <Badge key={chip}>{chip}</Badge>)}
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
+              <label className="inline-flex h-9 cursor-pointer items-center justify-center rounded-full px-3 text-sm text-[color:var(--app-text-soft)] hover:bg-[color:var(--app-panel-muted)]">
+                <Paperclip size={15} className="mr-1.5" />附件
+                <input type="file" multiple className="sr-only" onChange={(event) => { void onUploadAttachments(event.target.files); event.target.value = ""; }} />
+              </label>
               {activeTurn ? <Button variant="ghost" size="sm" onClick={onCancelTurn}><XCircle size={14} className="mr-1.5" />取消</Button> : null}
               {session?.latest_report_id ? (
                 <>
@@ -195,7 +212,7 @@ export function WorkspacePage({ catalog, controller, onOpenSettings, settings })
               )}
             </div>
 
-            <ComposerPanel activeTurn={controller.activeTurn} agents={catalog?.profiles || []} onCancelTurn={() => void controller.cancelCurrentTurn()} onDownloadReport={controller.downloadReport} onSendMessage={controller.sendMessage} permissionOverrides={controller.permissionOverrides} runtimeDraft={controller.runtimeDraft} session={controller.session} settings={settings} setTask={controller.setTask} task={controller.task} />
+            <ComposerPanel activeTurn={controller.activeTurn} agents={catalog?.profiles || []} attachmentDrafts={controller.attachmentDrafts} onCancelTurn={() => void controller.cancelCurrentTurn()} onDownloadReport={controller.downloadReport} onRemoveAttachment={controller.removeAttachmentDraft} onSendMessage={controller.sendMessage} onUploadAttachments={controller.uploadAttachments} permissionOverrides={controller.permissionOverrides} runtimeDraft={controller.runtimeDraft} session={controller.session} settings={settings} setTask={controller.setTask} task={controller.task} />
           </main>
         </div>
 

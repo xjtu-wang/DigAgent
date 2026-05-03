@@ -1,5 +1,5 @@
 name: report-writer
-description: Dedicated writer for evidence-backed final reports.
+description: Dedicated writer for evidence-backed final reports, writeups, findings summaries, and limitations sections after execution evidence exists.
 provider: openai-compatible
 model: ${MODEL}
 subagents: []

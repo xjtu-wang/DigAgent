@@ -5,7 +5,7 @@ import json
 from contextlib import suppress
 from typing import Any, AsyncIterator
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -30,6 +30,7 @@ class SessionTurnRequest(BaseModel):
     profile: str = "sisyphus-default"
     auto_approve: bool | None = None
     mentions: list[str] = Field(default_factory=list)
+    artifact_refs: list[str] = Field(default_factory=list)
     title: str | None = None
     scope: Scope = Field(default_factory=Scope)
 
@@ -40,6 +41,7 @@ class CreateTurnRequest(BaseModel):
     session_id: str | None = None
     auto_approve: bool | None = None
     mentions: list[str] = Field(default_factory=list)
+    artifact_refs: list[str] = Field(default_factory=list)
     title: str | None = None
     scope: Scope = Field(default_factory=Scope)
 
@@ -222,6 +224,7 @@ def create_app(manager: TurnManager | None = None) -> FastAPI:
             scope=body.scope,
             auto_approve=bool(body.auto_approve),
             mentions=body.mentions,
+            artifact_refs=body.artifact_refs,
             title=body.title,
         )
         return serialize_turn_result(session, result)
@@ -260,6 +263,7 @@ def create_app(manager: TurnManager | None = None) -> FastAPI:
             scope=body.scope,
             auto_approve=bool(body.auto_approve),
             mentions=body.mentions,
+            artifact_refs=body.artifact_refs,
             title=body.title,
         )
         return serialize_turn_result(session, result)
@@ -314,6 +318,7 @@ def create_app(manager: TurnManager | None = None) -> FastAPI:
             scope=body.scope,
             auto_approve=bool(body.auto_approve),
             mentions=body.mentions,
+            artifact_refs=body.artifact_refs,
             title=body.title,
         )
         return serialize_turn_result(session, result)
@@ -343,6 +348,17 @@ def create_app(manager: TurnManager | None = None) -> FastAPI:
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"deleted_session_id": deleted_session_id}
+
+    @app.post("/api/sessions/{session_id}/attachments")
+    async def upload_session_attachment(session_id: str, file: UploadFile = File(...)):
+        require_supported_session(session_id)
+        artifact = manager.storage.save_attachment(
+            session_id=session_id,
+            content=await file.read(),
+            filename=file.filename or "attachment.bin",
+            mime_type=file.content_type or "application/octet-stream",
+        )
+        return artifact.model_dump(mode="json")
 
     @app.get("/api/evidence/{evidence_id}")
     async def get_evidence(evidence_id: str):

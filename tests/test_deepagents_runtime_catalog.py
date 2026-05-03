@@ -15,6 +15,7 @@ EXPECTED_PROJECT_TOOLS = {
     "cve_search_local",
     "cve_sync_sources",
     "ctf_orchestrator_inventory",
+    "python_exec",
     "report_export",
     "shell_exec",
     "vuln_kb_lookup",
@@ -50,6 +51,7 @@ def test_interrupt_config_uses_manifest_defaults(test_settings) -> None:
     assert config is not None
     assert config["cve_sync_sources"] is True
     assert config["edit_file"] is True
+    assert config["python_exec"] is True
     assert config["report_export"] is True
     assert config["shell_exec"] is True
     assert "vuln_kb_lookup" not in config

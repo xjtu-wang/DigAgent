@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 
 from digagent.config import AppSettings, get_settings, load_profiles
+from digagent.deepagents_runtime.workspace import agent_workspace_dir, turn_attachments_dir
 from digagent.deepagents_runtime import session_ops as session_ops_module
 from digagent.deepagents_runtime.manager_ops import TurnManagerOpsMixin
 from digagent.deepagents_runtime.state import SessionRuntimeHandle, extract_assistant_text, extract_text_chunk
@@ -106,37 +109,56 @@ class TurnManager(TurnManagerOpsMixin):
         auto_approve: bool,
         mentions: list[str] | None = None,
         title: str | None = None,
+        artifact_refs: list[str] | None = None,
     ) -> tuple[SessionRecord, UserTurnResult]:
         if not self.settings.can_use_model:
             raise RuntimeError("Real model is not configured; refusing to run without a real model.")
         addressed = self._validate_mentions(mentions)
+        artifact_ids = self._validate_artifact_refs(session_id, artifact_refs)
         routed_profile = addressed[0] if addressed else profile_name
         context = self._turn_context_for(profile_name, routed_profile, addressed)
-        session = self.storage.load_session(session_id)
-        session = self._update_session_metadata(session, profile_name=profile_name, title=title, scope=scope, **context)
-        turn = self.storage.create_turn(
-            session_id=session.session_id,
-            profile_name=routed_profile,
-            task=content,
-            scope=session.scope,
-            budget=RuntimeBudget(),
+        session, turn, user_message = self._prepare_message_turn(
+            session_id=session_id,
+            content=content,
+            profile_name=profile_name,
+            routed_profile=routed_profile,
+            scope=scope,
+            auto_approve=auto_approve,
+            title=title,
+            context=context,
+            addressed=addressed,
+            artifact_ids=artifact_ids,
+        )
+        return await self._execute_prepared_message_turn(
+            session=session,
+            turn=turn,
+            user_message=user_message,
+            content=content,
+            profile_name=profile_name,
+            context=context,
+            addressed=addressed,
+            artifact_ids=artifact_ids,
             auto_approve=auto_approve,
         )
-        turn.root_agent_id = profile_name
-        turn = self._sync_turn_context(turn, **context)
-        user_message = self._append_message(
-            session.session_id,
-            turn.turn_id,
-            content,
-            role=MessageRole.USER,
-            speaker_profile="user",
-            addressed_participants=addressed,
-            participant_profile=routed_profile,
-            handoff_from=profile_name if addressed else None,
-            handoff_to=routed_profile if addressed else None,
-        )
-        turn.trigger_message_id = user_message.message_id
-        self.storage.save_turn(turn)
+
+    async def _execute_prepared_message_turn(
+        self,
+        *,
+        session: SessionRecord,
+        turn: TurnRecord,
+        user_message,
+        content: str,
+        profile_name: str,
+        context: dict[str, Any],
+        addressed: list[str],
+        artifact_ids: list[str],
+        auto_approve: bool,
+    ) -> tuple[SessionRecord, UserTurnResult]:
+        self._materialize_turn_attachments(session.session_id, turn.turn_id, artifact_ids)
+        if artifact_ids:
+            old_handle = self._runtimes.pop(session.session_id, None)
+            if old_handle is not None:
+                await old_handle.aclose()
         self._sync_session_context(session.session_id, **context)
         self._maybe_schedule_session_title(
             session,
@@ -144,7 +166,7 @@ class TurnManager(TurnManagerOpsMixin):
             message_id=user_message.message_id,
             content=content,
         )
-        handle = await self._runtime_handle(self.storage.load_session(session_id), auto_approve=auto_approve)
+        handle = await self._runtime_handle(self.storage.load_session(session.session_id), auto_approve=auto_approve)
         old_turn, old_task = await self._activate_turn(handle, turn, content, **context)
         if old_turn is not None:
             self._supersede_turn(old_turn, new_turn_id=turn.turn_id)
@@ -166,6 +188,50 @@ class TurnManager(TurnManagerOpsMixin):
             graph_input={"messages": [HumanMessage(content=content)]},
             handle=handle,
         )
+
+    def _prepare_message_turn(
+        self,
+        *,
+        session_id: str,
+        content: str,
+        profile_name: str,
+        routed_profile: str,
+        scope: Scope,
+        auto_approve: bool,
+        title: str | None,
+        context: dict[str, Any],
+        addressed: list[str],
+        artifact_ids: list[str],
+    ):
+        session = self.storage.load_session(session_id)
+        session = self._update_session_metadata(session, profile_name=profile_name, title=title, scope=scope, **context)
+        session = self._attach_artifacts_to_session(session, artifact_ids)
+        turn = self.storage.create_turn(
+            session_id=session.session_id,
+            profile_name=routed_profile,
+            task=content,
+            scope=session.scope,
+            budget=RuntimeBudget(),
+            auto_approve=auto_approve,
+        )
+        turn.root_agent_id = profile_name
+        turn.artifact_ids = list(artifact_ids)
+        turn = self._sync_turn_context(turn, **context)
+        user_message = self._append_message(
+            session.session_id,
+            turn.turn_id,
+            content,
+            role=MessageRole.USER,
+            speaker_profile="user",
+            addressed_participants=addressed,
+            participant_profile=routed_profile,
+            handoff_from=profile_name if addressed else None,
+            handoff_to=routed_profile if addressed else None,
+            artifact_refs=artifact_ids,
+        )
+        turn.trigger_message_id = user_message.message_id
+        self.storage.save_turn(turn)
+        return session, turn, user_message
 
     async def approve(
         self,
@@ -264,6 +330,47 @@ class TurnManager(TurnManagerOpsMixin):
                 resolved.append(profile_name)
         return resolved
 
+    def _validate_artifact_refs(self, session_id: str, artifact_refs: list[str] | None) -> list[str]:
+        resolved: list[str] = []
+        for artifact_id in artifact_refs or []:
+            candidate = str(artifact_id or "").strip()
+            if not candidate:
+                raise ValueError("Artifact refs must not be blank.")
+            artifact = self.storage.load_artifact(candidate)
+            if artifact.session_id != session_id:
+                raise ValueError(f"Artifact does not belong to session {session_id}: {candidate}")
+            if candidate not in resolved:
+                resolved.append(candidate)
+        return resolved
+
+    def _attach_artifacts_to_session(self, session: SessionRecord, artifact_ids: list[str]) -> SessionRecord:
+        if not artifact_ids:
+            return session
+        scope = session.scope.model_copy(deep=True)
+        for artifact_id in artifact_ids:
+            if artifact_id not in scope.artifacts:
+                scope.artifacts.append(artifact_id)
+        session.scope = scope
+        self.storage.save_session(session)
+        return session
+
+    def _materialize_turn_attachments(self, session_id: str, turn_id: str, artifact_ids: list[str]) -> None:
+        if not artifact_ids:
+            return
+        targets = [turn_attachments_dir(self.settings, session_id, turn_id)]
+        for profile_name in load_profiles(self.settings):
+            targets.append(agent_workspace_dir(self.settings, session_id, profile_name) / "attachments")
+        for target in targets:
+            target.mkdir(parents=True, exist_ok=True)
+            for artifact_id in artifact_ids:
+                self._copy_attachment(artifact_id, target)
+
+    def _copy_attachment(self, artifact_id: str, target_dir: Path) -> None:
+        artifact = self.storage.load_artifact(artifact_id)
+        source = Path(artifact.storage_path)
+        filename = Path(artifact.filename or source.name).name
+        shutil.copyfile(source, target_dir / f"{artifact.artifact_id}_{filename}")
+
     def _turn_context_for(self, requester_profile: str, participant_profile: str, addressed: list[str]) -> dict[str, Any]:
         return self._participant_context(
             speaker_profile=participant_profile,
@@ -319,6 +426,7 @@ class TurnManager(TurnManagerOpsMixin):
             profile_name=profile_name,
             auto_approve=resolved_auto_approve,
             overrides=session.permission_overrides,
+            scope=session.scope,
             settings=self.settings,
         )
         return SessionRuntimeHandle(
@@ -508,7 +616,6 @@ class TurnManager(TurnManagerOpsMixin):
             version="v2",
         ):
             mode, data, ns = coerce_stream_part(chunk)
-            self._emit(session_id, turn_id, f"langgraph_{mode}", {"ns": list(ns), "payload": data}, **active_context)
             self._record_assistant_chunk(session_id, turn_id, mode, data, active_context)
             self._record_task_graph(session_id, turn_id, mode, data, ns, active_context)
         snapshot = await active_handle.runtime.agent.aget_state(config)
@@ -574,7 +681,7 @@ class TurnManager(TurnManagerOpsMixin):
         text = extract_text_chunk(message)
         if not text:
             return
-        self._emit(session_id, turn_id, "assistant_chunk", {"text": text, "metadata": metadata}, **context)
+        self._broadcast_live_event(session_id, turn_id, "assistant_chunk", {"text": text, "metadata": metadata}, **context)
 
     def _record_task_graph(
         self,
@@ -592,7 +699,6 @@ class TurnManager(TurnManagerOpsMixin):
         turn.task_graph = graph
         turn.budget_usage = compute_budget_usage(graph, started_at=turn.started_at or turn.created_at, now=utc_now())
         self.storage.save_turn(turn)
-        self._emit(session_id, turn_id, "task_graph_updated", graph.model_dump(mode="json"), **context)
         for event_type, payload in events:
             self._emit(session_id, turn_id, event_type, payload, **context)
 

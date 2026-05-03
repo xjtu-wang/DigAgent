@@ -1,0 +1,36 @@
+name: python_exec
+description: Execute Python code with the project .venv interpreter in the current agent workspace.
+version: 1
+function: run
+args_schema:
+  type: object
+  properties:
+    code:
+      type: string
+    timeout:
+      type: integer
+  required: [code]
+output_schema:
+  type: object
+  properties:
+    command:
+      type: string
+    exit_code:
+      type: integer
+    stdout:
+      type: string
+    stderr:
+      type: string
+    output:
+      type: string
+    truncated:
+      type: boolean
+risk_tags:
+  - python_exec
+  - shell_exec
+timeout_sec: 60
+env_policy: inherit
+working_dir: .
+interrupt_on_call: true
+memory_hooks: {}
+report_hooks: {}

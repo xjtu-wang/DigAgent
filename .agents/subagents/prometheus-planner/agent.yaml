@@ -1,5 +1,5 @@
 name: prometheus-planner
-description: Planner for ambiguous security tasks. Use this agent only for task decomposition, clarifying missing information, and assigning execution to specialists.
+description: Planner for ambiguous or multi-stage security tasks. Use this agent for clarification, decomposition, task graphs, and assigning execution to specialists; it should not perform hands-on validation.
 provider: openai-compatible
 model: ${MODEL}
 subagents: []

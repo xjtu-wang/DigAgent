@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from digagent.models import RuntimeBudget, Scope, TurnEvent
+from digagent.deepagents_runtime.streaming import apply_stream_part
 from tests.runtime_import_stubs import empty_checkpoint
 from tests.runtime_turn_fakes import FakeAgent, fake_runtime_factory, wait_for_turn_count
 
@@ -54,10 +55,28 @@ async def test_handle_message_persists_turn_and_events(manager, monkeypatch) -> 
     assert [message.speaker_profile for message in messages] == ["user", "sisyphus-default"]
     assert [event.type for event in manager.load_turn_event_history(turn.turn_id)] == [
         "turn_started",
-        "langgraph_updates",
         "assistant_message",
         "completed",
     ]
+
+
+def test_task_node_events_omit_raw_langgraph_payload() -> None:
+    graph, events, changed = apply_stream_part(
+        None,
+        turn_id="turn_test",
+        mode="tasks",
+        data={"id": "node-1", "name": "read_file", "input": {"messages": ["secret"]}},
+        ns=("root",),
+    )
+
+    assert changed is True
+    assert graph.nodes[0].metadata["payload_preview"]
+    assert "payload" not in graph.nodes[0].metadata
+    assert events[0][1]["metadata"] == {
+        "ns": ["root"],
+        "task_id": "node-1",
+        "payload_preview": graph.nodes[0].metadata["payload_preview"],
+    }
 
 
 @pytest.mark.asyncio

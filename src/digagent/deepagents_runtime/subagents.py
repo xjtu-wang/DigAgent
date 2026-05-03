@@ -4,12 +4,13 @@ from deepagents import SubAgent
 from langchain_openai import ChatOpenAI
 
 from digagent.config import AppSettings, get_settings, load_profiles
-from digagent.models import SessionPermissionOverrides
+from digagent.models import Scope, SessionPermissionOverrides
 
 from .mcp_prompt import append_mcp_prompt_context
 from .permissions import filesystem_permissions, interrupt_on_config
 from .tool_policy import ToolAllowlistMiddleware
 from .tools import build_agent_tools
+from .workspace import ensure_runtime_workspace, workspace_prompt_context
 
 
 def configured_agent_profiles(settings: AppSettings | None = None) -> tuple[str, ...]:
@@ -19,11 +20,13 @@ def configured_agent_profiles(settings: AppSettings | None = None) -> tuple[str,
 
 async def build_subagents(
     *,
+    session_id: str,
     settings: AppSettings | None = None,
     root_profile_name: str,
     skill_sources: list[str],
     overrides: SessionPermissionOverrides | None,
     auto_approve: bool,
+    scope=None,
 ) -> list[SubAgent]:
     resolved = settings or get_settings()
     profiles = load_profiles(resolved)
@@ -31,13 +34,25 @@ async def build_subagents(
     specs: list[SubAgent] = []
     for name in root_profile.subagents:
         profile = profiles[name]
-        bindings, allowed_names = await build_agent_tools(profile, settings=resolved, overrides=overrides)
-        system_prompt = append_mcp_prompt_context(
+        workspace = ensure_runtime_workspace(
+            session_id=session_id,
+            profile_name=name,
+            scope=scope or Scope(),
+            settings=resolved,
+        )
+        bindings, allowed_names = await build_agent_tools(
+            profile,
+            settings=resolved,
+            overrides=overrides,
+            workspace_dir=workspace.workspace_dir,
+        )
+        base_prompt = append_mcp_prompt_context(
             profile.system_prompt,
             profile=profile,
             bindings=bindings,
             settings=resolved,
         )
+        system_prompt = f"{base_prompt}\n\n{workspace_prompt_context(workspace)}"
         spec: SubAgent = {
             "name": name,
             "description": profile.description,

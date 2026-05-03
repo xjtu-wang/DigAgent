@@ -19,6 +19,7 @@ tool_allowlist:
   - web_search
   - web_fetch
   - shell_exec
+  - python_exec
   - cve_search_local
   - cve_fetch_online
   - cve_sync_sources

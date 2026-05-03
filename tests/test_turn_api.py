@@ -42,7 +42,7 @@ async def test_turn_endpoints_expose_turn_records(test_settings, monkeypatch, ru
         assert turn.json()["turn_id"] == turn_id
         events = await client.get(f"/api/turns/{turn_id}/events?history_only=true")
         events.raise_for_status()
-        assert [item["type"] for item in parse_sse_events(events.text)] == ["turn_started", "langgraph_updates", "assistant_message", "completed"]
+        assert [item["type"] for item in parse_sse_events(events.text)] == ["turn_started", "assistant_message", "completed"]
 
 
 @pytest.mark.asyncio
@@ -62,6 +62,51 @@ async def test_create_turn_endpoint_creates_session_when_missing(test_settings, 
         assert payload["turn"]["status"] == "completed"
         assert payload["session"]["active_turn_id"] is None
         assert payload["session"]["turn_ids"] == [payload["turn"]["turn_id"]]
+
+
+@pytest.mark.asyncio
+async def test_session_attachment_upload_links_message_turn_and_scope(test_settings, monkeypatch, runtime_modules) -> None:
+    turn_manager, create_app = runtime_modules
+    agent = FakeAgent()
+    monkeypatch.setattr("digagent.deepagents_runtime.session_ops.build_runtime", fake_runtime_factory(agent))
+    manager = turn_manager(test_settings)
+    app = create_app(manager)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        session = (
+            await client.post(
+                "/api/sessions",
+                json={"title": "attachments", "profile": "sisyphus-default", "scope": Scope().model_dump(mode="json")},
+            )
+        ).json()
+        upload = await client.post(
+            f"/api/sessions/{session['session_id']}/attachments",
+            files={"file": ("flag.txt", b"flag{demo}", "text/plain")},
+        )
+        upload.raise_for_status()
+        artifact = upload.json()
+        response = await client.post(
+            f"/api/sessions/{session['session_id']}/messages",
+            json={
+                "content": "read attachment",
+                "profile": "sisyphus-default",
+                "auto_approve": True,
+                "scope": Scope().model_dump(mode="json"),
+                "artifact_refs": [artifact["artifact_id"]],
+            },
+        )
+        response.raise_for_status()
+
+    payload = response.json()
+    turn = manager.get_turn(payload["turn"]["turn_id"])
+    messages = manager.list_messages(session["session_id"])
+    session_record = manager.storage.load_session(session["session_id"])
+    attachment_dir = test_settings.data_dir / "workspaces" / session["session_id"] / "turns" / turn.turn_id / "attachments"
+
+    assert artifact["filename"] == "flag.txt"
+    assert artifact["artifact_id"] in turn.artifact_ids
+    assert artifact["artifact_id"] in messages[0].artifact_refs
+    assert artifact["artifact_id"] in session_record.scope.artifacts
+    assert any(path.name.startswith(artifact["artifact_id"]) for path in attachment_dir.iterdir())
 
 
 @pytest.mark.asyncio

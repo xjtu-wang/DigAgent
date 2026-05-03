@@ -130,6 +130,7 @@ class TurnManagerOpsMixin(TurnManagerSessionMixin):
         turn_id: str | None,
         content: str,
         role: MessageRole,
+        artifact_refs: list[str] | None = None,
         **kwargs: Any,
     ) -> MessageRecord:
         context = self._participant_context(**kwargs)
@@ -140,6 +141,7 @@ class TurnManagerOpsMixin(TurnManagerSessionMixin):
             role=role,
             sender="user" if role == MessageRole.USER else "assistant",
             content=content,
+            artifact_refs=list(artifact_refs or []),
             **context,
             created_at=utc_now(),
         )

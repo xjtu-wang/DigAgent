@@ -180,6 +180,7 @@ class TurnManagerSessionMixin:
             profile_name=session.root_agent_profile,
             auto_approve=resolved_auto_approve,
             overrides=session.permission_overrides,
+            scope=session.scope,
             settings=self.settings,
         )
         handle = SessionRuntimeHandle(

@@ -24,9 +24,10 @@ async def build_agent_tools(
     *,
     settings: AppSettings | None = None,
     overrides: SessionPermissionOverrides | None = None,
+    workspace_dir=None,
 ) -> tuple[list[RuntimeToolBinding], frozenset[str]]:
     resolved = settings or get_settings()
-    project_bindings = build_project_tools(resolved, allowed_domains=tuple(profile.network_scope))
+    project_bindings = build_project_tools(resolved, allowed_domains=tuple(profile.network_scope), workspace_dir=workspace_dir)
     candidate_names = allowed_tool_names(profile, project_bindings, overrides)
     custom_bindings = [binding for binding in project_bindings if binding.name in candidate_names]
     mcp_bindings = await build_mcp_tools(

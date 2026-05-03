@@ -611,6 +611,7 @@ class ArtifactRecord(DigAgentModel):
     kind: str
     session_id: str
     turn_id: str
+    filename: str | None = None
     storage_path: str
     mime_type: str
     size_bytes: int

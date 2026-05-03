@@ -1,5 +1,5 @@
 name: memory-curator
-description: Curator for layered long-term memory, daily notes, and wiki updates.
+description: Curator for layered long-term memory, daily notes, wiki updates, and stable reusable project knowledge.
 provider: openai-compatible
 model: ${MODEL}
 subagents: []
